@@ -78,6 +78,10 @@ export class SessionManager extends EventEmitter {
     }, 42_000).unref();
   }
 
+  async sendText(params: { cid: string; uid: string; orgId: string; convName: string; text: string }) {
+    return this.requireSession().sendText(params);
+  }
+
   async listDialogs(): Promise<LwpFrame> {
     return this.requireSession().listDialogs();
   }

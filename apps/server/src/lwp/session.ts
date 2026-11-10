@@ -6,6 +6,7 @@ import { LwpClient } from './client.js';
 import { MidGenerator, baseHeaders, type LwpFrame } from './frame.js';
 import { extractText } from './message-codec.js';
 import { strId, numField, concat } from './bodies.js';
+import { buildSendBody } from './send-builder.js';
 
 export interface SessionConfig {
   host?: string;
@@ -94,6 +95,12 @@ export class DingtalkSession {
   /** 已读回执 */
   async markRead(dialogId: string): Promise<LwpFrame> {
     return this.client.request('/r/IDLMessageStatus/updateToReadV2', this.headers('p'));
+  }
+
+  /** 发送文本消息 */
+  async sendText(params: { cid: string; uid: string; orgId: string; convName: string; text: string }): Promise<LwpFrame> {
+    const body = buildSendBody(params);
+    return this.client.request('/r/IDLSend/send', this.headers('p'), body);
   }
 
   /** 心跳 */

@@ -41,7 +41,7 @@ pnpm --filter @teletalk/server dev
 | GET | `/api/replay?dir=` | ✅ 离线回放 |
 | GET | `/api/dialogs` | ⚠️ 请求体外层未解 |
 | GET | `/api/messages/:id` | ⚠️ 同上 |
-| POST | `/api/send` | ⬜ 未实现 |
+| POST | `/api/send` | ✅ 构造器 10/10 验证 |
 
 ## 验证
 
@@ -60,9 +60,11 @@ npx tsx scripts/test-codec.ts <抓包目录>
 
 ## 进度
 
-- ✅ LWP 帧编解码（2032 帧实测）
-- ✅ 消息正文编解码（12 条全解）
-- ✅ 字符串 ID 字段构造（逐字节验证 2/2）
+- ✅ LWP 帧编解码（2254 帧实测）
+- ✅ 消息正文编解码（短/长消息全解）
+- ✅ **IDLSend 发送构造（10/10 样本字节完全一致）**
+- ✅ /s/sync 推送解析（54 条真实消息）
+- ✅ 字符串 ID 字段构造（2/2）
 - ✅ TLS 连接、mid 配对、心跳、注册/订阅
-- ⬜ 请求体外层长度前缀（`0x91` 类）
-- ⬜ IDLSend 发送构造
+- ✅ 离线回放、预览页
+- ⬜ 会话列表请求体外层长度前缀

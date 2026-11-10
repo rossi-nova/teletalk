@@ -89,7 +89,16 @@ export function createRoutes(manager: SessionManager): Hono {
     }
   });
 
-  app.post('/api/send', (c) => c.json({ error: '待实现：IDLSend 请求体构造未完成' }, 501));
+  app.post('/api/send', async (c) => {
+    try {
+      const body = await c.req.json<{ cid: string; uid: string; orgId: string; convName: string; text: string }>();
+      if (!body.text?.trim()) return c.json({ error: 'text 不能为空' }, 400);
+      const frame = await manager.sendText(body);
+      return c.json({ ok: frame.code === 200, code: frame.code });
+    } catch (e) {
+      return c.json({ ok: false, error: (e as Error).message }, 400);
+    }
+  });
 
   return app;
 }
