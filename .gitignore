@@ -18,3 +18,6 @@ tools/mitm/certs/sites/
 tools/mitm/proxy-backup.json
 tools/mitm/certs/ca.srl
 docs/research/dingtalk-protocol/extracted/lwp-samples/parsed.txt
+
+# 网关
+apps/server/.env
