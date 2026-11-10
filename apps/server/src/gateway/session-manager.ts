@@ -3,6 +3,7 @@
  */
 import { EventEmitter } from 'node:events';
 import { DingtalkSession } from '../lwp/session.js';
+import type { LwpFrame } from '../lwp/frame.js';
 import { extractText } from '../lwp/message-codec.js';
 import type { Config } from '../config.js';
 import type { GatewayEvent, AuthState, Message } from '@teletalk/shared';
@@ -75,6 +76,14 @@ export class SessionManager extends EventEmitter {
     setInterval(() => {
       session.heartbeat().catch(() => {});
     }, 42_000).unref();
+  }
+
+  async listDialogs(): Promise<LwpFrame> {
+    return this.requireSession().listDialogs();
+  }
+
+  async listMessages(dialogId: string, limit?: number): Promise<LwpFrame> {
+    return this.requireSession().listMessages(dialogId, limit);
   }
 
   requireSession(): DingtalkSession {

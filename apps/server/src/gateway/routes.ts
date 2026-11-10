@@ -55,10 +55,41 @@ export function createRoutes(manager: SessionManager): Hono {
     }),
   );
 
-  // —— 占位：需协议字段补齐后启用 ——
-  app.get('/api/dialogs', (c) => c.json({ error: '待实现：需补齐 listNewestExtV4 的请求体' }, 501));
-  app.get('/api/messages/:dialogId', (c) => c.json({ error: '待实现：需补齐 listMessagesPaginationV2 的请求体' }, 501));
-  app.post('/api/send', (c) => c.json({ error: '待实现：需补齐 IDLSend 的请求体构造' }, 501));
+  // —— 离线回放（无凭据时验证用）——
+  app.get('/api/replay', async (c) => {
+    const dir = c.req.query('dir');
+    if (!dir) return c.json({ error: '需要 dir 参数指向抓包目录' }, 400);
+    try {
+      const { replayMessages } = await import('./mock.js');
+      const r = replayMessages(dir);
+      return c.json({ frames: r.frames, count: r.messages.length, messages: r.messages });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  // —— 会话 ——
+  app.get('/api/dialogs', async (c) => {
+    try {
+      const frame = await manager.listDialogs();
+      return c.json({ code: frame.code, bytes: frame.body.length, hex: frame.body.toString('hex').slice(0, 400) });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  app.get('/api/messages/:dialogId', async (c) => {
+    const dialogId = c.req.param('dialogId');
+    const limit = Number(c.req.query('limit') ?? 20);
+    try {
+      const frame = await manager.listMessages(dialogId, limit);
+      return c.json({ code: frame.code, bytes: frame.body.length, hex: frame.body.toString('hex').slice(0, 800) });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  app.post('/api/send', (c) => c.json({ error: '待实现：IDLSend 请求体构造未完成' }, 501));
 
   return app;
 }

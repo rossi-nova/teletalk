@@ -5,6 +5,7 @@
 import { LwpClient } from './client.js';
 import { MidGenerator, baseHeaders, type LwpFrame } from './frame.js';
 import { extractText } from './message-codec.js';
+import { strId, numField, concat } from './bodies.js';
 
 export interface SessionConfig {
   host?: string;
@@ -78,14 +79,16 @@ export class DingtalkSession {
     this.orgId = orgId;
   }
 
-  /** 拉取会话列表 */
+  /** 拉取会话列表（请求体格式待补外层长度） */
   async listDialogs(): Promise<LwpFrame> {
-    return this.client.request('/r/IDLConversation/listNewestExtV4', this.headers('p'));
+    const body = numField([0x00, 0x00, 0x01, 0x04, 0x00, 30]);
+    return this.client.request('/r/Adaptor/IDLOnebox/listNewest', this.headers('p'), body);
   }
 
-  /** 拉取历史消息 */
-  async listMessages(dialogId: string, limit = 30): Promise<LwpFrame> {
-    return this.client.request('/r/IDLMessage/listMessagesPaginationV2', this.headers('p'));
+  /** 拉取历史消息（cursor 传 0 取最新一页） */
+  async listMessages(dialogId: string, limit = 20): Promise<LwpFrame> {
+    const body = concat(strId(dialogId), numField([0x00, 0x00, 0x01]), Buffer.from([limit]));
+    return this.client.request('/r/IDLMessage/listMessagesPaginationV2', this.headers('p'), body);
   }
 
   /** 已读回执 */

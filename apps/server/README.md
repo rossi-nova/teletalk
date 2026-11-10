@@ -1,6 +1,6 @@
 # 网关服务
 
-钉钉 LWP 私有协议 ↔ HTTP/SSE，供前端消费。
+钉钉 LWP 私有协议 ↔ HTTP/SSE。
 
 ## 结构
 
@@ -11,37 +11,58 @@ src/
 ├── lwp/
 │   ├── frame.ts           LWP 帧编解码
 │   ├── message-codec.ts   IDLSend 报文编解码
-│   ├── client.ts          TLS 长连接 + 请求配对
-│   └── session.ts         业务语义（注册/订阅/收发）
+│   ├── bodies.ts          请求体构造器（逐字节验证）
+│   ├── client.ts          TLS 长连接 + mid 配对
+│   └── session.ts         业务语义
 └── gateway/
     ├── session-manager.ts 会话持有与事件广播
+    ├── mock.ts            离线回放
     └── routes.ts          REST + SSE
 ```
 
 ## 启动
 
 ```bash
-cp .env.example .env   # 填入 DT_DEVICE_ID / DT_TOKEN
+cp apps/server/.env.example apps/server/.env   # 填入 DT_DEVICE_ID / DT_TOKEN
 pnpm --filter @teletalk/server dev
 ```
 
+无凭据时仍可启动，用离线回放验证。
+
 ## 接口
 
-| 方法 | 路径 | 说明 |
+| 方法 | 路径 | 状态 |
 |---|---|---|
-| GET | `/health` | 存活检查 |
-| GET | `/api/status` | 连接与登录状态 |
-| POST | `/api/connect` | 建立到钉钉的连接 |
-| POST | `/api/disconnect` | 断开 |
-| GET | `/api/events` | SSE 事件流 |
-| GET | `/api/dialogs` | 会话列表（待补请求体） |
-| GET | `/api/messages/:id` | 历史消息（待补请求体） |
-| POST | `/api/send` | 发送消息（待补请求体） |
+| GET | `/health` | ✅ |
+| GET | `/api/status` | ✅ |
+| POST | `/api/connect` | ✅ |
+| POST | `/api/disconnect` | ✅ |
+| GET | `/api/events` | ✅ SSE |
+| GET | `/api/replay?dir=` | ✅ 离线回放 |
+| GET | `/api/dialogs` | ⚠️ 请求体外层未解 |
+| GET | `/api/messages/:id` | ⚠️ 同上 |
+| POST | `/api/send` | ⬜ 未实现 |
 
-## 当前进度
+## 验证
 
-- ✅ LWP 帧编解码（用 1932 帧实测通过）
-- ✅ 消息正文编解码（11 条样本中 10 条解出）
-- ✅ TLS 连接、mid 配对、心跳
-- ✅ 注册/订阅流程
-- ⬜ 会话列表、历史消息、发送的请求体字段（protobuf 字段号未提取）
+```bash
+# 离线回放（无需凭据）
+curl "http://127.0.0.1:8787/api/replay?dir=.../captures/run-*/conn/*"
+# → {"frames":2032,"count":12,"messages":[...]}
+
+# 构造器自检
+npx tsx scripts/test-bodies.ts
+# → 2/2 通过
+
+# 抓包解析
+npx tsx scripts/test-codec.ts <抓包目录>
+```
+
+## 进度
+
+- ✅ LWP 帧编解码（2032 帧实测）
+- ✅ 消息正文编解码（12 条全解）
+- ✅ 字符串 ID 字段构造（逐字节验证 2/2）
+- ✅ TLS 连接、mid 配对、心跳、注册/订阅
+- ⬜ 请求体外层长度前缀（`0x91` 类）
+- ⬜ IDLSend 发送构造
