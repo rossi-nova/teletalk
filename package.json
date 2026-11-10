@@ -1,0 +1,16 @@
+{
+  "name": "teletalk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram Web 前端 + 钉钉私有协议的 IM 客户端",
+  "scripts": {
+    "probe": "tsx scripts/probe.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0"
+  }
+}

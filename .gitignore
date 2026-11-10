@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.env
+.env.local
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+credentials*.json
+.DS_Store
+Thumbs.db
