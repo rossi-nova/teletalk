@@ -15,14 +15,17 @@ export function decodeLenMarker(buf, p) {
   return null;
 }
 
-/** 从 body 提取消息正文 */
+/** 从 body 提取消息正文（用尾部固定串定位，长短消息通用） */
 export function extractText(body) {
   const i = body.indexOf(Buffer.from([0x81, 0x01]));
   if (i < 0) return null;
-  const m = decodeLenMarker(body, i + 2);
-  if (!m) return null;
-  const start = i + 2 + m.consumed;
-  return body.slice(start, start + m.len).toString('utf8');
+  const tail = Buffer.from([0x07, 0x90, 0x06, 0x01, 0x07]);
+  const t = body.indexOf(tail, i);
+  if (t < 0) return null;
+  const region = body.slice(i + 2, t);
+  // marker：首字节 0xDA 时占 2 字节，否则 1 字节
+  const markerLen = region[0] === 0xda ? 3 : 1;
+  return region.slice(markerLen).toString('utf8');
 }
 
 /** 提取可读字段 */
