@@ -92,20 +92,60 @@ LWP <uri>\n
 | `/r/Adaptor/TangleNetworkSession/heartbeat` | 心跳（tangle 子系统） |
 | `/r/LogI/batchLog` | 日志上报 |
 
-## 7. Body 编码
+## 7. Body 编码（实证）
 
-- **`dt:j`** → 明文 JSON（首字节 `0x5b` = `[`），可直接解析。21/170 个样本属于此类
-- **`dt:p`** → **标准 protobuf**（varint tag + wire type）。已实证：`da 00` 解出 tag=`0x5a`（varint 续位），即 **field 11 / wire type 2**，随后是变长数据
-- **无 dt** → 同样按 protobuf 处理（如 `/r/Aladdin/lookup`）
+### 已确认
 
-> 字段号可通过标准 protobuf 解析器提取，只是需要正确的帧边界（见 `parse-lwp.mjs`）
+| dt | 编码 | 证据 |
+|---|---|---|
+| `j` | 明文 JSON | 首字节 `0x5b` = `[`，如 `[{"sectionType":1000,...}]` |
+| `p` | protobuf 变体 | tag 为 varint，字段真实存在 |
+| 缺省 | 同 `p` | `/r/Aladdin/lookup` |
 
-**JSON body 实例**（`/r/Adaptor/RecentUseI/addRecentUseRecord`）：
-```json
-[{"recentUseModels":[{"sectionType":1000,"bizType":4,"bizId":"4213828832",
-  "title":"2025年度考核","icon":"https://...png",
-  "url":"https://www.aliwork.com/APP_.../workbench","timeStamp":1794279557286}]}]
+### tag 解析（已实证）
+
 ```
+da 00   → varint = 0x5a = 90 → field 11, wire type 2
+```
+
+即**两字节 varint 表示 tag**，符合 protobuf 规范。
+
+### 未确认：长度字段
+
+同一帧内，`da 00` 后跟 `58`（88）但实际数据只有 30 字节，长度编码规则未完全对上。
+可能原因：
+
+1. 长度是**变长编码**且与 protobuf varint 不同（如 LEB128 变体）
+2. body 外层还有一层未识别的容器
+3. 存在压缩或加密包装
+
+**结论：读明文串可以直接定位内容（`/r/IDLSend/send` 的 body 里能直接看到消息正文、会话名、orgId、资源 ID），但程序化解析还需要更多样本比对。**
+
+### 实例：发送一条文本消息
+
+```
+LWP /r/IDLSend/send
+mid:f09102f3 0
+dt:p
+len:240
+```
+
+body 内可直接读出的内容（按字节偏移）：
+
+| 偏移 | 内容 | 推断 |
+|---|---|---|
+| 3 | `VaXHx2W@` | 会话 cid 片段 |
+| 13 | `79553200501` | 发送者 uid |
+| 33 | `测试` | **消息正文** |
+| 49 | `customUnreadCountType` | 扩展字段键 |
+| 71 | `edu_guardian` | 扩展字段值 |
+| 84 | `customUnreadTotalCount` | 扩展字段键 |
+| 109 | `oid` → `880519069` | 组织 ID |
+| 117 | `钉钉帕鲁(班主任)` | 会话名 |
+| 157 | `{"empVer":0,"orgId":"880519069"}` | **明文 JSON** |
+| 193 | `@lQLP...VAA` | 资源/图片 ID |
+
+> 这条请求说明：**文本消息的正文在 body 里是未加密的 UTF-8**，可以直接提取。
 
 ## 8. 服务发现响应
 
