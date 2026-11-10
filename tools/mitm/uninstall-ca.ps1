@@ -1,4 +1,4 @@
-# 从当前用户的受信任根证书中移除 teletalk MITM CA。
+﻿# 从当前用户的受信任根证书中移除 teletalk MITM CA。
 $ErrorActionPreference = 'Stop'
 $caPath = Join-Path $PSScriptRoot 'certs\ca.crt'
 if (-not (Test-Path $caPath)) { Write-Error "找不到 CA 证书"; exit 1 }

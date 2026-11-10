@@ -1,4 +1,4 @@
-# 把 teletalk MITM 根证书装进当前用户的「受信任的根证书颁发机构」。
+﻿# 把 teletalk MITM 根证书装进当前用户的「受信任的根证书颁发机构」。
 # 只影响当前用户（Cert:\CurrentUser\Root），不需要管理员权限，可用 uninstall-ca.ps1 移除。
 # 用法： powershell -ExecutionPolicy Bypass -File install-ca.ps1
 

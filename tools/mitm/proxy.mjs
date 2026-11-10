@@ -1,10 +1,17 @@
 /**
- * teletalk MITM 代理（HTTP CONNECT 隧道 + TLS 解密 + 抓包落盘）
+ * teletalk 精简 MITM 代理 —— 只拦截指定域名，其余一律直通。
+ *
+ * 设计要点：
+ *   - 默认只拦 tls-desktop.dingtalk.com（主 IM 长连接），可用 --host 追加
+ *   - 未命中域名：纯 TCP 隧道，零开销、零干扰
+ *   - 连接复用：长连接不关闭时按 5 秒增量落盘，避免内存堆积
+ *   - 上游可直连（默认）或经 mihomo
  *
  * 用法：
- *   node proxy.mjs [--port 8888] [--out ../../captures]
- *
- * 只记录，不修改流量。白名单外的域名走纯隧道直通，不解密。
+ *   node proxy.mjs [--port 8888] [--host a.com,b.com]
+ * 环境：
+ *   UPSTREAM_HOST=127.0.0.1 UPSTREAM_PORT=7897   经上游代理（设为 none 直连）
+ *   ALLOW_BAD_UPSTREAM=1                          跳过上游证书校验
  */
 import http from 'node:http';
 import net from 'node:net';
@@ -15,95 +22,146 @@ import { fileURLToPath } from 'node:url';
 import { certForHost } from './certs.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-
-function arg(name, fallback) {
-  const i = process.argv.indexOf(`--${name}`);
-  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
-}
+const arg = (n, d) => {
+  const i = process.argv.indexOf(`--${n}`);
+  return i !== -1 && process.argv[i + 1] ? process.argv[i + 1] : d;
+};
 
 const PORT = Number(arg('port', '8888'));
+const DEFAULT_HOSTS = 'tls-desktop.dingtalk.com';
+const HOSTS = new Set(arg('host', DEFAULT_HOSTS).split(',').map((s) => s.trim()).filter(Boolean));
+
 const OUT_DIR = join(HERE, arg('out', '../../captures'));
 const RUN_DIR = join(OUT_DIR, `run-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+const FLUSH_MS = Number(arg('flush', '5000'));
 
-const INTERCEPT = [/(^|\.)dingtalk\.com$/, /(^|\.)dingtalkapps\.com$/, /(^|\.)alicdn\.com$/];
-const intercept = (host) => INTERCEPT.some((re) => re.test(host));
+const UP = (process.env.UPSTREAM_HOST ?? 'none').toLowerCase() === 'none'
+  ? null
+  : { host: process.env.UPSTREAM_HOST || '127.0.0.1', port: Number(process.env.UPSTREAM_PORT || 7897) };
+const ALLOW_BAD = process.env.ALLOW_BAD_UPSTREAM === '1';
 
 if (!existsSync(RUN_DIR)) mkdirSync(RUN_DIR, { recursive: true });
-
-let seq = 0;
-function record(host, kind, data) {
-  const n = String(++seq).padStart(4, '0');
-  const f = join(RUN_DIR, `${n}-${host}-${kind}.bin`);
-  createWriteStream(f).end(data);
-  return f;
-}
 const log = (...a) => console.log(`[${new Date().toISOString().slice(11, 23)}]`, ...a);
 
-const server = http.createServer((req, res) => {
-  res.writeHead(501, { 'content-type': 'text/plain' });
-  res.end('teletalk MITM: 仅支持 HTTPS CONNECT');
-});
+const CONN_DIR = join(RUN_DIR, 'conn');
+mkdirSync(CONN_DIR, { recursive: true });
+
+let connSeq = 0;
+/** 为一条连接建独立目录，c2s/s2c 分段编号写入 */
+function openConn(host) {
+  const id = String(++connSeq).padStart(4, '0');
+  const dir = join(CONN_DIR, `${id}-${host}`);
+  mkdirSync(dir, { recursive: true });
+  let cSeq = 0, sSeq = 0;
+  const meta = { id, host, startedAt: new Date().toISOString(), chunks: { c2s: 0, s2c: 0 } };
+  return {
+    meta,
+    c2s(buf) { createWriteStream(join(dir, `${String(++cSeq).padStart(4, '0')}-c2s.bin`)).end(buf); meta.chunks.c2s++; },
+    s2c(buf) { createWriteStream(join(dir, `${String(++sSeq).padStart(4, '0')}-s2c.bin`)).end(buf); meta.chunks.s2c++; },
+  };
+}
+
+/** 经上游建立隧道 */
+function openTunnel(host, port) {
+  return new Promise((resolve, reject) => {
+    if (!UP) {
+      const s = net.connect({ host, port }, () => resolve(s));
+      s.on('error', reject);
+      return;
+    }
+    const raw = net.connect(UP.port, UP.host, () => {
+      raw.write(`CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n\r\n`);
+    });
+    let buf = Buffer.alloc(0);
+    const onData = (c) => {
+      buf = Buffer.concat([buf, c]);
+      const i = buf.indexOf('\r\n\r\n');
+      if (i === -1) return;
+      raw.removeListener('data', onData);
+      const head = buf.slice(0, i).toString();
+      if (!/^HTTP\/1\.[01] 200/.test(head)) { raw.destroy(); reject(new Error(head.split('\r\n')[0])); return; }
+      const rest = buf.slice(i + 4);
+      if (rest.length) raw.unshift(rest);
+      resolve(raw);
+    };
+    raw.on('data', onData);
+    raw.once('error', reject);
+  });
+}
+
+const server = http.createServer();
 
 server.on('connect', (req, clientSocket, head) => {
   const [host, portStr] = (req.url || '').split(':');
   const port = Number(portStr || 443);
 
-  if (!intercept(host)) {
-    const upstream = net.connect(port, host, () => {
+  // —— 非目标域名：纯隧道直通，零干扰 ——
+  if (!HOSTS.has(host)) {
+    const up = net.connect(port, host, () => {
       clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      if (head?.length) upstream.write(head);
-      upstream.pipe(clientSocket);
-      clientSocket.pipe(upstream);
+      if (head?.length) up.write(head);
+      up.pipe(clientSocket);
+      clientSocket.pipe(up);
     });
-    upstream.on('error', () => clientSocket.destroy());
-    clientSocket.on('error', () => upstream.destroy());
+    up.on('error', () => clientSocket.destroy());
+    clientSocket.on('error', () => up.destroy());
     return;
   }
 
-  log('TLS', host, port);
-  clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-  if (head?.length) clientSocket.unshift(head);
-
   let site;
   try { site = certForHost(host); }
-  catch (e) { log('cert error', host, e.message); clientSocket.destroy(); return; }
+  catch (e) { log('cert err', host, e.message); clientSocket.destroy(); return; }
 
-  // 用 tls.TLSSocket 包装，手动喂数据
-  const tlsSocket = new tls.TLSSocket(clientSocket, {
-    isServer: true,
-    key: site.key,
-    cert: site.cert,
-    ALPNProtocols: ['http/1.1'],
-  });
+  const conn = openConn(host);
+  log('intercept', host, '#' + conn.meta.id);
 
-  tlsSocket.once('secure', () => {
-    log('client handshake ok', host, 'alpn=', tlsSocket.alpnProtocol);
-    const upstream = tls.connect({ host, port, servername: host, ALPNProtocols: ['http/1.1'] });
-    const c2s = [], s2c = [];
+  clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n', () => {
+    const ls = tls.createServer({ key: site.key, cert: site.cert }, (client) => {
+      if (head?.length) client.unshift(head);
 
-    upstream.once('secureConnect', () => {
-      log('upstream secure', host);
-      upstream.on('data', (c) => { s2c.push(c); tlsSocket.write(c); });
-      upstream.on('end', () => { tlsSocket.end(); });
-      upstream.on('close', () => {
-        if (s2c.length) record(host, 's2c', Buffer.concat(s2c));
-        if (c2s.length) record(host, 'c2s', Buffer.concat(c2s));
-        log('closed', host, `c2s=${c2s.length}B s2c=${s2c.length}B`);
-      });
-      upstream.on('error', (e) => { log('upstream err', host, e.message); tlsSocket.destroy(); });
-      tlsSocket.on('data', (c) => { c2s.push(c); upstream.write(c); });
-      tlsSocket.on('end', () => upstream.end());
-      tlsSocket.on('error', (e) => log('client err', host, e.message));
+      openTunnel(host, port).then((tunnel) => {
+        const up = tls.connect({ socket: tunnel, servername: host, rejectUnauthorized: !ALLOW_BAD });
+
+        up.once('secureConnect', () => {
+          log('stream up', host, '#' + conn.meta.id);
+
+          // 增量落盘：每 FLUSH_MS 把累积的数据写成独立文件
+          const pendC = [], pendS = [];
+          const timer = setInterval(() => {
+            if (pendC.length) { conn.c2s(Buffer.concat(pendC)); pendC.length = 0; }
+            if (pendS.length) { conn.s2c(Buffer.concat(pendS)); pendS.length = 0; }
+          }, FLUSH_MS);
+          timer.unref();
+
+          const finish = (why) => {
+            clearInterval(timer);
+            if (pendC.length) conn.c2s(Buffer.concat(pendC));
+            if (pendS.length) conn.s2c(Buffer.concat(pendS));
+            log('close', host, '#' + conn.meta.id, why,
+              `c2s=${conn.meta.chunks.c2s} s2c=${conn.meta.chunks.s2c}`);
+          };
+
+          client.on('data', (c) => { pendC.push(c); up.write(c); });
+          up.on('data', (c) => { pendS.push(c); client.write(c); });
+          client.on('end', () => up.end());
+          up.on('end', () => client.end());
+          client.on('close', () => finish('client-close'));
+          up.on('close', () => finish('upstream-close'));
+          client.on('error', (e) => log('client err', host, e.message));
+          up.on('error', (e) => { log('up err', host, e.message); client.destroy(); });
+        });
+        up.on('error', (e) => { log('up tls err', host, e.message); client.destroy(); });
+      }).catch((e) => { log('tunnel err', host, e.message); client.destroy(); });
     });
-    upstream.on('error', (e) => { log('upstream connect err', host, e.message); tlsSocket.destroy(); });
+    ls.on('tlsClientError', (e) => log('tls err', host, e.message));
+    ls.emit('connection', clientSocket);
   });
-
-  tlsSocket.on('error', (e) => log('tls err', host, e.message));
 });
 
 server.listen(PORT, () => {
-  log(`MITM 代理已启动 :${PORT}`);
-  log(`输出目录: ${RUN_DIR}`);
+  log(`MITM :${PORT}`);
+  log(`拦截: ${[...HOSTS].join(', ')}`);
+  log(`上游: ${UP ? `${UP.host}:${UP.port}` : '直连'}`);
+  log(`输出: ${RUN_DIR}`);
 });
-
-process.on('SIGINT', () => { log('关闭'); server.close(); process.exit(0); });
+process.on('SIGINT', () => { server.close(); process.exit(0); });

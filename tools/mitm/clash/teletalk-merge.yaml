@@ -1,0 +1,43 @@
+# Profile Enhancement Merge Template for Clash Verge
+
+profile:
+  store-selected: true
+
+proxies:
+  - name: teletalk-mitm
+    type: http
+    server: 127.0.0.1
+    port: 8888
+    udp: false
+
+proxy-groups:
+  - name: teletalk-capture
+    type: select
+    proxies:
+      - teletalk-mitm
+      - DIRECT
+
+rules:
+  # ★ 必须置顶：MITM 代理进程自身直连，否则出站又进 TUN，形成回环
+  - PROCESS-NAME,node.exe,DIRECT
+
+  # ★ 只拦主 IM 长连接这一个域名。其余钉钉流量全部正常直连，
+  #    代理挂了也只会影响长连接，不会导致钉钉整体断网。
+  - DOMAIN,tls-desktop.dingtalk.com,teletalk-capture
+
+dns:
+  fake-ip-filter:
+    - 'tls-desktop.dingtalk.com'
+    - '+.dingtalk.com'
+    - '+.dingtalkapps.com'
+    - '+.dingding.com'
+    - '+.alicdn.com'
+
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    TLS:
+      ports: [443]
+    HTTP:
+      ports: [80]

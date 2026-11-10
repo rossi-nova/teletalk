@@ -1,4 +1,4 @@
-# 设置 / 还原当前用户的系统 HTTP 代理（WinINET，即钉钉读取的那一处）。
+﻿# 设置 / 还原当前用户的系统 HTTP 代理（WinINET，即钉钉读取的那一处）。
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File setup-proxy.ps1 -Enable -Port 8888
 #   powershell -ExecutionPolicy Bypass -File setup-proxy.ps1 -Disable
