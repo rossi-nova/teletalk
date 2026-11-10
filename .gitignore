@@ -10,3 +10,10 @@ dist/
 credentials*.json
 .DS_Store
 Thumbs.db
+
+# 抓包产物与私钥
+captures/
+tools/mitm/certs/ca.key
+tools/mitm/certs/sites/
+tools/mitm/proxy-backup.json
+tools/mitm/certs/ca.srl
