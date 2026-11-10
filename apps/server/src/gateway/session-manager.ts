@@ -36,6 +36,9 @@ export class SessionManager extends EventEmitter {
     const session = new DingtalkSession(this.cfg);
     this.session = session;
 
+    session.client.on('raw-close', (info: unknown) => console.warn('[连接关闭]', JSON.stringify(info)));
+    session.client.on('raw-end', () => console.warn('[对端结束]'));
+    session.client.on('error', (e: Error) => console.warn('[连接错误]', e.message));
     session.client.on('close', () => {
       this.auth = { ...this.auth, loggedIn: false };
       this.broadcast({ type: 'status', auth: this.auth });
@@ -61,6 +64,7 @@ export class SessionManager extends EventEmitter {
     await session.lookup();
     await session.regInit();
     const reg = await session.register();
+    console.warn('[/reg 响应]', 'code=' + reg.code, 'bytes=' + reg.body.length, JSON.stringify(reg.body.toString('utf8').slice(0, 200)));
     if (reg.code !== 200) throw new Error(`注册失败: HTTP ${reg.code}`);
 
     session.subscribe();

@@ -43,8 +43,9 @@ export class LwpClient extends EventEmitter {
         this.socket = socket;
         this.closed = false;
         socket.on('data', (chunk) => this.onData(chunk));
-        socket.on('close', () => this.onClose());
+        socket.on('close', (hadError) => { this.emit('raw-close', { hadError }); this.onClose(); });
         socket.on('error', (e) => this.emit('error', e));
+        socket.on('end', () => this.emit('raw-end'));
         this.emit('connect');
         resolve();
       });
