@@ -76,6 +76,7 @@
     word-break: break-word; white-space: pre-wrap;
   }
   .msg.self { align-self: flex-end; background: var(--bubble-self); }
+  .msg .who { font-size: 11px; color: var(--accent); margin-bottom: 2px; font-weight: 500; }
   .msg .time { font-size: 11px; color: var(--fg2); margin-top: 3px; text-align: right; }
   .empty { margin: auto; color: var(--fg2); text-align: center; padding: 40px; }
   #composer {
@@ -154,7 +155,9 @@ function buildDialogs(messages) {
   }
   dialogs = Array.from(byDialog.entries()).map(function (pair) {
     const id = pair[0], msgs = pair[1];
-    return { id: id, title: '会话 ' + id, messages: msgs, last: msgs[msgs.length - 1] };
+    const last = msgs[msgs.length - 1];
+    const title = '会话 ' + id + (last && last.senderName ? ' · ' + last.senderName : '');
+    return { id: id, title: title, messages: msgs, last: last };
   });
   renderSidebar();
   if (dialogs.length && !active) selectDialog(dialogs[0].id);
@@ -196,7 +199,15 @@ function selectDialog(id) {
   d.messages.forEach(function (m) {
     const div = document.createElement('div');
     div.className = 'msg' + (m.self ? ' self' : '');
-    div.textContent = m.text;
+    if (m.senderName) {
+      const who = document.createElement('div');
+      who.className = 'who';
+      who.textContent = m.senderName;
+      div.appendChild(who);
+    }
+    const body = document.createElement('div');
+    body.textContent = m.text;
+    div.appendChild(body);
     const time = document.createElement('div');
     time.className = 'time';
     time.textContent = new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { parseFrames } from '../lwp/frame.js';
 import { inspect } from '../lwp/message-codec.js';
 import { parseSync } from '../lwp/sync-parser.js';
+import { parseProfiles, mergeProfiles } from '../lwp/profile-parser.js';
 import type { Message } from '@teletalk/shared';
 
 export interface ReplayResult {
@@ -18,7 +19,20 @@ export function replayMessages(dir: string): ReplayResult {
   let frames = 0;
   const messages: Message[] = [];
   const seenMsg = new Set<string>();
+  const profiles = new Map<string, string>();
 
+  // 第一趟：收集 uid → 昵称
+  for (const f of readdirSync(dir).filter((x) => x.endsWith('.bin'))) {
+    for (const fr of parseFrames(readFileSync(join(dir, f))).frames) {
+      if (fr.kind !== 'res' || fr.body.length < 100) continue;
+      if (!/[a-z]+^[a-z]+/.test(fr.body.toString('utf8'))) continue;
+      for (const p of parseProfiles(fr.body)) {
+        if (!profiles.has(p.uid)) profiles.set(p.uid, p.nick);
+      }
+    }
+  }
+
+  // 第二趟：消息
   for (const f of readdirSync(dir).filter((x) => x.endsWith('.bin'))) {
     const { frames: fs_ } = parseFrames(readFileSync(join(dir, f)));
     for (const fr of fs_) {
@@ -32,7 +46,7 @@ export function replayMessages(dir: string): ReplayResult {
             id: sm.messageId,
             dialogId: sm.conversationId,
             senderId: sm.senderId,
-            senderName: sm.senderNick,
+            senderName: sm.senderNick ?? profiles.get(sm.senderId),
             text: sm.text,
             createdAt: Date.now(),
             kind: 'text',
@@ -47,6 +61,7 @@ export function replayMessages(dir: string): ReplayResult {
         id: fr.headers.mid ?? '',
         dialogId: p.cidHint ?? '',
         senderId: p.senderHint ?? '',
+        senderName: profiles.get(p.senderHint ?? ''),
         text: p.text,
         createdAt: Date.now(),
         kind: 'text',
