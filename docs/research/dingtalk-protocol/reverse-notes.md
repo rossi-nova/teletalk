@@ -1,92 +1,124 @@
-# 反汇编分析记录
+# 逆向分析记录
 
-> 对象：`MainFrame.dll`（171,636,584 字节，PE32+，ImageBase 0x180000000）
-> 工具：自研 PE 解析器 + 字符串交叉引用（`tools/disasm/`）
+> 对象：钉钉 Windows 客户端 9.0.5-Release.261029005
+> 分析日期：2026-11-10
+> 状态：**暂告段落**
 
-## 1. PE 结构
+## 1. 客户端组成
 
-| 节 | 虚拟地址 | 大小 | 说明 |
-|---|---|---|---|
-| `.text` | 0x1000 | 113 MB | 代码，**未 strip 符号**（含 RTTI 与函数名） |
-| `.rdata` | 0x6cc5000 | 43 MB | 只读数据、字符串 |
-| `.data` | 0x95e4000 | 7.9 MB | 可写数据 |
-| `.pdata` | 0x9d7a000 | 3.4 MB | 异常表 |
-| **`.detourc`** | 0xa0b0000 | 8.6 KB | **Microsoft Detours 代码段** |
-| **`.detourd`** | 0xa0b3000 | 24 B | Detours 数据段 |
-| `.rsrc` | 0xa0b4000 | 2.4 MB | 资源 |
-| `.reloc` | 0xa2fd000 | 1.06 MB | 重定位 |
+| 文件 | 大小 | 说明 |
+|---|---|---|
+| `MainFrame.dll` | 171 MB | 主程序，Qt5 + C++ 原生 |
+| `libgaea.dll` | 8.6 MB | 长连接框架 LWP |
+| `SecurityGuardSDK64.dll` | 11 MB | 阿里安全 SDK（签名） |
+| `security.dll` | 113 KB | 安全 SDK 的薄封装（3 个导出）|
+| `web_content.dat` | 102 MB | Web 资源，ZipCrypto 加密 |
 
-**发现**：存在 `.detourc` / `.detourd`，说明程序内置 Detours 做运行时函数挂钩（反调试/监控）。
+### PE 节表（MainFrame.dll）
 
-## 2. 消息字段结构（从 .rdata 的 JSON 定义提取）
+| 节 | 虚拟大小 | 说明 |
+|---|---|---|
+| `.text` | 113 MB | 代码，保留 RTTI 与符号 |
+| `.rdata` | 43 MB | 字符串与结构定义 |
+| **`.detourc`** | 8.6 KB | **Microsoft Detours 代码** |
+| **`.detourd`** | 24 B | **Detours 数据** |
+
+> `.detourc` / `.detourd` 说明程序内置运行时函数挂钩，用于监控与反调试。
+
+## 2. SecurityGuardSDK64.dll
+
+### 导出函数（6 个）
+
+| 函数 | 作用 |
+|---|---|
+| `initUMID` | 初始化 UMID 令牌 |
+| `getSecurityToken` | **生成签名令牌** |
+| `getCompatibelDcpToken` | 兼容版 DCP 令牌 |
+| `freeSecurityToken` | 释放令牌 |
+| `zeroUMID` | 清空 UMID |
+| `QueryInterface` | 接口查询 |
+
+`getSecurityToken` 位于 RVA `0x182380`。
+
+### 保护情况
+
+**未加壳**：无 VMProtect / Themida / OLLVM 特征，原生 AMD64 编译。
+
+### 内部线索
+
+| 字符串 | 含义 |
+|---|---|
+| `x-sign:` | `x5-sign` 的信号标记 |
+| `..\SignBox\SignBR` | 签名模块 |
+| `vmsign_config_fi` | **签名由配置驱动**（服务端可下发新版）|
+| `AliStore` | UMID 的加密存储层 |
+| `SHA256/SHA512/AES/X25519 ... CRYPTOGAMS` | 内嵌 OpenSSL |
+
+### 结论
+
+逆向 `getSecurityToken` 需要：
+1. 反汇编 9.2 MB 的 `.text`
+2. 理解 `AliStore` 的加密与密钥来源
+3. 复刻 `vmsign` 配置驱动的算法
+
+**且**：签名算法配置化，服务端可随时改版；主程序有 Detours 监控。
+
+**评估：投入产出比差，暂不推进。**
+
+## 3. 消息结构（从 .rdata 提取）
 
 ```json
 {
   "uuid": "Uf7bNJj",
-  "conversationId": "65440722019",          // ★ 11 位纯数字
+  "conversationId": "65440722019",
   "messageId": 22089984436203,
-  "sendProgress": -1.0,
-  "openId": 751900669,
   "contentType": 1,
   "textContent": { "text": "..." },
-  "contentVersion": "0",
-  "createdAt": "1738900140348",
-  "creatorType": 1,
   "extension": {
     "oid": "21001",
     "openConversationId": "cidkTrV1NjI7a7ew/Een6ePbQ==",
-    "realmFlag": "1",
     "realmOrgid": "439446171",
-    "sendMsgUUID": "Uc5Pp9w@",              // ★ 7 字符，含 @
+    "sendMsgUUID": "Uc5Pp9w@",
     "topicId": "21791327490369"
   }
 }
 ```
 
-### 关键确认
+### 关键结论
 
-**`sendMsgUUID` 就是 `IDLSend/send` body 里的 `aX?????@` 字段。**
+**`sendMsgUUID` = `IDLSend/send` body 中的 `aX?????@` 字段**（消息 UUID，非会话 ID）。
 
-证据：`.rdata` 中的 JSON 实例 `"sendMsgUUID": "Uc5Pp9w@"`，格式与抓包完全一致（`aX` + 4 字符 + `@`）。
+### 未解：会话 ID 的位置
 
-## 3. 会话 ID 未解之谜
-
-对同一 uid 的 10 条 `IDLSend/send` 做逐字节差分：
+对同 uid 的 10 条发送做逐字节差分：
 
 ```
 偏移 0-6     恒定
-偏移 6-10    变动 4 字节 ← sendMsgUUID 的中段
+偏移 6-10    变动 ← sendMsgUUID
 偏移 10-35   恒定
-偏移 35+     正文（长度不同导致整体错位）
+偏移 35+     正文（长度差异导致错位）
 ```
 
-body 内仅有的数字串：
+body 内数字串仅有：发送者 uid（偏移 13）、orgId（偏移 113/178）。**不含 11 位的 conversationId。**
 
-| 偏移 | 值 | 含义 |
-|---|---|---|
-| 13 | `79553200501` | 发送者 uid |
-| 113 | `880519069` | orgId |
-| 178 | `880519069` | orgId（JSON 副本） |
+推论：会话归属可能由长连接上下文（`/reg` 注册关系）决定，未证实。
 
-**没有 11 位的 `conversationId`。**
+## 4. 工具
 
-### 推论
+见 `tools/disasm/`：PE 解析、交叉引用、导出表、极简反汇编、字符串分类。
 
-`IDLSend/send` 的会话归属**不在请求体内**，可能由以下之一决定：
+**局限**：这是探查级工具，深度逆向需要 Ghidra / IDA Pro。
 
-1. 长连接上下文（`/reg` 时注册的会话集合）
-2. 隐藏在 body 的定长二进制字段中（如偏移 10-35 的某段）
-3. 由 `sendMsgUUID` 关联服务端的临时会话映射
+## 5. 下一步（若继续）
 
-## 4. 未完成
+1. 用 Ghidra 打开 `SecurityGuardSDK64.dll`，定位 `getSecurityToken` 的调用链
+2. 分析 `AliStore` 的密钥来源
+3. 或改走「登录代理」方案，不复刻签名
 
-- 未定位 `IDLSend` 的编码函数（`.text` 段 113MB，直接 LEA 搜索未命中）
-- 未确认会话上下文的传递方式
-- token 有效期短（抓包后数小时即 401），长期方案需实现扫码登录
-
-## 5. 复现
+## 6. 复核
 
 ```bash
-npx tsx tools/disasm/pe.ts <MainFrame.dll>              # 节表
-npx tsx tools/disasm/xref.ts <dll> <字符串> --limit 5    # 交叉引用
+npx tsx tools/disasm/pe.ts "C:/Program Files (x86)/DingDing/main/current/MainFrame.dll"
+npx tsx tools/disasm/exports.ts "C:/Program Files (x86)/DingDing/main/current/SecurityGuardSDK64.dll"
+npx tsx tools/disasm/strings-in-sdk.ts "C:/Program Files (x86)/DingDing/main/current/SecurityGuardSDK64.dll"
 ```
