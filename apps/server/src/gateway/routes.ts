@@ -55,6 +55,21 @@ export function createRoutes(manager: SessionManager): Hono {
     }),
   );
 
+  // —— 扫码登录 ——
+  app.post('/api/qrcode', async (c) => {
+    try {
+      const { QrLoginClient } = await import('../lwp/qr-login.js');
+      const cfg = (await import('../config.js')).loadConfig();
+      const qr = new QrLoginClient(cfg.dingtalk);
+      await qr.connect();
+      const result = await qr.requestQrCode();
+      qr.close();
+      return c.json({ ok: true, qrId: result.qrId, payload: result.payload });
+    } catch (e) {
+      return c.json({ ok: false, error: (e as Error).message }, 400);
+    }
+  });
+
   // —— 离线回放（无凭据时验证用）——
   app.get('/api/replay', async (c) => {
     const dir = c.req.query('dir');
