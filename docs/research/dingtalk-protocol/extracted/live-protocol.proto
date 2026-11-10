@@ -1,0 +1,129 @@
+// ===== sysDataV1.proto =====
+message TopicUser {
+  repeated message .TopicUser.User user = 1;
+  message User {
+    string userId = 1;
+    string nick = 2;
+    int64 addTime = 3;
+  }
+}
+message TopicStat {
+  int32 visitNum = 1;
+  int32 onlineNum = 2;
+  int32 totalNum = 3;
+  int32 msgNum = 4;
+  int32 digNum = 5;
+}
+message TextMessage {
+  string message = 1;
+  repeated message .TextMessage.ParamsEntry params = 2;
+  message ParamsEntry {
+    string key = 1;
+    string value = 2;
+  }
+}
+message CountInfo {
+  repeated message .CountInfo.ValueEntry value = 1;
+  message ValueEntry {
+    string key = 1;
+    int64 value = 2;
+  }
+}
+message JoinNotify {
+  int32 totalCount = 1;
+  int32 onlineCount = 2;
+  repeated message .JoinNotify.AddUsersEntry addUsers = 3;
+  int64 pageViewCount = 4;
+  message AddUsersEntry {
+    string key = 1;
+    string value = 2;
+  }
+}
+message PullMsgInfo {
+  int64 offset = 1;
+  int32 role = 2;
+  int32 period = 3;
+  repeated message .PullMsgInfo.PullMsg pullMsg = 4;
+  message PullMsg {
+    int64 offset = 1;
+    bytes messages = 2;
+  }
+}
+message Config {
+  int32 version = 1;
+  int32 namespace = 2;
+  string appKey = 3;
+  string sdkVersion = 4;
+  string content = 5;
+  bool isValid = 6;
+}
+
+// ===== headerV1.proto =====
+message Header {
+  string topic = 1;
+  int32 priority = 2;
+  int32 statusCode = 3;
+  string sdkVersion = 4;
+  string appVersion = 5;
+  string messageId = 6;
+  int32 subType = 7;
+  string userId = 8;
+  string token = 9;
+  int32 monitorTag = 10;
+  message .Header.Config config = 11;
+  int32 platform = 12;
+  message Config {
+    int32 configVersion = 1;
+    int32 delayRate = 2;
+  }
+}
+
+// ===== bodyV1.proto =====
+message Msg {
+  string from = 2;
+  string to = 3;
+  int64 timestamp = 4;
+  bool sendFullTags = 5;
+  repeated string sendTags = 6;
+}
+message Count {
+  repeated message .Count.ExpressionEntry expression = 1;
+  message ExpressionEntry {
+    string key = 1;
+    double value = 2;
+  }
+}
+message Command {
+  int32 permission = 2;
+  int32 periodTime = 3;
+  int32 type = 4;
+  int32 subType = 5;
+}
+message Request {
+  int64 index = 1;
+  int32 pageSize = 2;
+  int32 role = 3;
+  string bizTag = 4;
+}
+message Subscribe {
+  string from = 1;
+  int32 role = 2;
+  string bizTag = 3;
+  int32 period = 4;
+  string ext = 5;
+  int64 timestamp = 6;
+}
+message P2p {
+  string traceId = 1;
+}
+message Report {
+  string bizTag = 1;
+  int32 preSubType = 2;
+  int32 source = 3;
+  int64 timestamp = 4;
+  string ext = 5;
+}
+message Monitor {
+  string sdkVersion = 1;
+  string data = 2;
+}
