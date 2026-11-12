@@ -120,6 +120,21 @@ ab <cid>  c2  cf 0000019f  61  <cursor varint>  1d
 - 点会话 → `GET /api/messages/:id`
 - 实时推送 → `EventSource /api/events`
 
+## 5. 未攻下的据点
+
+### getMessageByIdWithCidV2
+
+目的是绕开推送依赖，直接拿带 senderId 的单条消息。
+
+试过 20+ 种参数组合（`S(full)`、`S(cid)+S(ts)`、V2 嵌套结构、NUM 数字串等），
+全部返回 `Decode parameter error: 1`（第 1 个参数解码失败）。
+
+嵌入 `86 01` 外层前缀后错误变成 `Parameter not found: 1`，说明这层有意义，
+但 field 1 的具体格式始终没摸到。
+
+钉钉客户端平常也不调用这个接口（旧抓包里没有它的请求帧），
+推测是按需触发（引用回复场景）。暂时不值得继续攻。
+
 ## 实测结果
 
 | 指标 | 结果 |
