@@ -182,15 +182,24 @@ export class DingtalkSession {
   /**
    * 推送里有 senderId/sourceNick，但历史消息接口（V1/V2）不返回。
    * 这里把 messageId → {senderId,nick} 记下来，解析历史时回填。
+   *
+   * 推送体形如：
+   *   {"senderId":290811940,...,"content":{...}}  <0xaa>"sourceNick"<0xa9>"滑双莹"
+   * 注意分隔符是 Gaea 长度前缀字节（0x80|(32+len)），不是 \0。
    */
   private rememberSenders(body: Buffer): void {
     const s = body.toString('utf8');
-    const re = /\{"senderId":(\d+),"conversationId":"([^"]+)","messageId":(\d+)[\s\S]{0,200}?"content":\{([\s\S]*?)\}\}/g;
+    const re = /\{"senderId":(\d+),"conversationId":"([^"]*)","messageId":(\d+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(s))) {
       const [, senderId, , messageId] = m;
-      const nick = s.match(new RegExp(`\\u0000sourceNick\\u0000([^\\u0000]{1,40})`))?.[1]?.trim();
-      if (messageId) this.senderCache.set(messageId!, { senderId: senderId!, nick });
+      if (!messageId) continue;
+      const after = s.slice(m.index, m.index + 1500);
+      // sourceNick 后面跟着长度前缀（0x80.. range）再接昵称
+      const nick = after.match(/sourceNick[\s\S]?([^\u0000-\u001f]{1,40}?)(?=[\u0000-\u001f]|$)/)?.[1]
+        ?.replace(/^[\u0080-ÿ]/, '')
+        .trim();
+      this.senderCache.set(messageId, { senderId: senderId!, nick: nick || undefined });
     }
   }
 

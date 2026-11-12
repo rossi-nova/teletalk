@@ -67,6 +67,26 @@ export interface ParsedMessage extends Message {
   senderKey: number;
   /** 原始消息 ID（3-{cid}-{ts}） */
   rawId?: string;
+  /** 服务端的「第几天」倒计时值（越小越旧）。同一天内相同。 */
+  dayMark?: number;
+}
+
+/**
+ * 从消息块里读「日序」标记。
+ *
+ * 每条消息块内有一对 Gaea 小整数（前缀 0xcd，2 字节大端），
+ * 第二个值随消息变旧而单调递减，单位是「天」：
+ * 同一批抓包里从 4173（最新）降到 4165（8 天前）。
+ *
+ * 注意：这是相对值，没有找到绝对基准；只能用于比较先后 / 估跨度。
+ */
+function readDayMark(seg: Buffer): number | undefined {
+  let seen = 0;
+  for (let k = 0; k + 2 < seg.length; k++) {
+    if (seg[k] !== 0xcd) continue;
+    if (++seen === 2) return seg.readUInt16BE(k + 1);
+  }
+  return undefined;
 }
 
 /** 解析 V1 历史消息响应 */
@@ -111,13 +131,25 @@ export function parseMessagePage(body: Buffer, dialogId: string): ParsedMessage[
       senderId: '',           // 接口不提供
       senderName: undefined,  // 接口不提供
       text,
-      createdAt: Date.now(),  // 接口不提供可读时间，按返回顺序近似
+      createdAt: Date.now(),  // 接口不提供绝对时间，按返回顺序近似
       kind: 'text',
       self: false,
       senderKey: readSenderKey(body, o),
       rawId,
+      dayMark: readDayMark(seg),
     });
   });
+
+  // 用日序把 createdAt 拉开：同 dayMark 视作同一天，按响应顺序均匀分布
+  const marks = out.filter((x) => x.dayMark != null);
+  if (marks.length > 1) {
+    const newest = Math.max(...marks.map((x) => x.dayMark!));
+    const now = Date.now();
+    for (const m of out) {
+      if (m.dayMark == null) continue;
+      m.createdAt = now - (newest - m.dayMark) * 86_400_000;
+    }
+  }
 
   return out.filter((x) => x.text.length > 0);
 }
