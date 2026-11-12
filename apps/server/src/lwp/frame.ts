@@ -80,6 +80,7 @@ export function baseHeaders(opts: {
   const h: Record<string, string> = {
     mid: opts.mid,
     'app-key': opts.appKey,
+    appkey: opts.appkey,
     did: opts.did,
     tz: 'Asia/Shanghai',
     ua: opts.ua,

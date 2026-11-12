@@ -5,6 +5,7 @@
 import tls from 'node:tls';
 import { EventEmitter } from 'node:events';
 import { parseFrames, encodeRequest, type LwpFrame } from './frame.js';
+import { maybeGunzip } from './decompress.js';
 
 export interface LwpClientOptions {
   host: string;
@@ -65,6 +66,10 @@ export class LwpClient extends EventEmitter {
   }
 
   private dispatch(frame: LwpFrame): void {
+    // 大响应 gzip 压缩，统一解压
+    if (frame.kind === 'res' && frame.body.length > 3) {
+      frame = { ...frame, body: maybeGunzip(frame.body) };
+    }
     if (frame.kind === 'res') {
       const mid = frame.headers.mid;
       if (mid) {

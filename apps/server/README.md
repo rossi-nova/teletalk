@@ -1,71 +1,42 @@
-# 网关服务
+# teletalk 网关
 
-钉钉 LWP 私有协议 ↔ HTTP/SSE。
+把钉钉私有协议（LWP）包装成 REST + SSE，供前端调用。
 
-## 结构
-
-```
-src/
-├── config.ts              配置（环境变量）
-├── index.ts               Hono 入口
-├── lwp/
-│   ├── frame.ts           LWP 帧编解码
-│   ├── message-codec.ts   IDLSend 报文编解码
-│   ├── bodies.ts          请求体构造器（逐字节验证）
-│   ├── client.ts          TLS 长连接 + mid 配对
-│   └── session.ts         业务语义
-└── gateway/
-    ├── session-manager.ts 会话持有与事件广播
-    ├── mock.ts            离线回放
-    └── routes.ts          REST + SSE
-```
-
-## 启动
+## 使用
 
 ```bash
-cp apps/server/.env.example apps/server/.env   # 填入 DT_DEVICE_ID / DT_TOKEN
 pnpm --filter @teletalk/server dev
 ```
 
-无凭据时仍可启动，用离线回放验证。
+打开 <http://127.0.0.1:8787>（内置预览页）。
+
+首次点「连接钉钉」时网关会：
+
+1. 若钉钉未运行则**自动拉起**（需此前已扫码登录过一次，会自动登录）
+2. 从钉钉进程内存抓取 `token` / `did`（grab-all.exe）
+3. 用 token 走 `/reg` 验证
+4. **验证通过后才关闭钉钉**（避免多客户端互踢），再用已验证的凭据重连
+5. 订阅 `/s/sync` 等推送通道
+
+全程约 30~40 秒，之后连接稳定。
 
 ## 接口
 
-| 方法 | 路径 | 状态 |
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/health` | ✅ |
-| GET | `/api/status` | ✅ |
-| POST | `/api/connect` | ✅ |
-| POST | `/api/disconnect` | ✅ |
-| GET | `/api/events` | ✅ SSE |
-| GET | `/api/replay?dir=` | ✅ 离线回放 |
-| GET | `/api/dialogs` | ⚠️ 请求体外层未解 |
-| GET | `/api/messages/:id` | ⚠️ 同上 |
-| POST | `/api/send` | ✅ 构造器 10/10 验证 |
+| GET | `/api/status` | 连接状态 |
+| POST | `/api/connect` | 启动会话（自动抓凭据） |
+| POST | `/api/disconnect` | 断开 |
+| GET | `/api/dialogs` | 会话列表（`?ids=a,b` 指定）|
+| GET | `/api/dialogs/:id` | 单个会话 |
+| GET | `/api/messages/:dialogId?limit=30` | 历史消息 |
+| POST | `/api/send` | 发送文本（待完善）|
+| GET | `/api/events` | SSE 实时推送 |
 
-## 验证
+## 已知约束
 
-```bash
-# 离线回放（无需凭据）
-curl "http://127.0.0.1:8787/api/replay?dir=.../captures/run-*/conn/*"
-# → {"frames":2032,"count":12,"messages":[...]}
-
-# 构造器自检
-npx tsx scripts/test-bodies.ts
-# → 2/2 通过
-
-# 抓包解析
-npx tsx scripts/test-codec.ts <抓包目录>
-```
-
-## 进度
-
-- ✅ LWP 帧编解码（2254 帧实测）
-- ✅ 消息正文编解码（短/长消息全解）
-- ✅ **IDLSend 发送构造（10/10 样本字节完全一致）**
-- ✅ /s/sync 推送解析（54 条真实消息）
-- ✅ 字符串 ID 字段构造（2/2）
-- ✅ TLS 连接、mid 配对、心跳、注册/订阅
-- ✅ 离线回放、预览页
-- ⚠️ 会话名与发送者昵称：profile 接口只覆盖部分用户，其余显示 uid
-- ⬜ 会话列表请求体外层长度前缀
+- **token 极短命**：钉钉每次重启都会轮换 token，且复用后立即失效。所以必须「拉起钉钉 → 立即抓 → 立即连」。
+- **必须订阅**：`listMessagesPagination` 要求先 `/s/sync` 订阅且等待约 2 秒，否则报 `Parameter not found`。
+- **游标固定**：服务端校验具体游标值，任意值会被拒绝。当前默认 `95482`（抓包最新页），向前翻页需 `1778`。
+- **消息字段不完整**：V1 响应是 Gaea 二进制，sender/时间戳字段号未破解，目前只提取文本块。
+- **x5-sign 非必需**：实测不带签名反而更稳，业务请求已全部走无签名头。

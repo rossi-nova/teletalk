@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>teletalk 预览</title>
+<title>teletalk</title>
 <style>
   :root {
     --bg: #ffffff; --bg2: #f4f4f5; --fg: #0f0f0f; --fg2: #707579;
@@ -29,13 +29,10 @@
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
   .status { font-size: 12px; color: var(--fg2); }
-  .dot {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    background: #4caf50; margin-right: 5px;
-  }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4caf50; margin-right: 5px; }
   .dot.off { background: #bbb; }
   input[type=text] {
-    flex: 1; min-width: 200px; padding: 6px 10px;
+    flex: 1; min-width: 160px; padding: 6px 10px;
     border: 1px solid var(--line); border-radius: 8px;
     background: var(--bg2); color: var(--fg); font-size: 13px;
   }
@@ -45,16 +42,11 @@
   }
   button:hover { filter: brightness(1.08); }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   main { flex: 1; display: grid; grid-template-columns: 280px 1fr; overflow: hidden; }
-  @media (max-width: 720px) {
-    main { grid-template-columns: 1fr; }
-    #sidebar { display: none; }
-  }
+  @media (max-width: 720px) { main { grid-template-columns: 1fr; } #sidebar { display: none; } }
   #sidebar { background: var(--bg); border-right: 1px solid var(--line); overflow-y: auto; }
-  .dialog {
-    padding: 10px 14px; border-bottom: 1px solid var(--line);
-    cursor: pointer; display: flex; gap: 10px; align-items: center;
-  }
+  .dialog { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; gap: 10px; align-items: center; }
   .dialog:hover, .dialog.active { background: var(--bg2); }
   .avatar {
     width: 38px; height: 38px; border-radius: 50%;
@@ -63,10 +55,7 @@
   }
   .dialog .meta { min-width: 0; flex: 1; }
   .dialog .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dialog .preview {
-    font-size: 12px; color: var(--fg2);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
+  .dialog .preview { font-size: 12px; color: var(--fg2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #chat { display: flex; flex-direction: column; overflow: hidden; background: var(--bg2); }
   #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
   .msg {
@@ -79,30 +68,26 @@
   .msg .who { font-size: 11px; color: var(--accent); margin-bottom: 2px; font-weight: 500; }
   .msg .time { font-size: 11px; color: var(--fg2); margin-top: 3px; text-align: right; }
   .empty { margin: auto; color: var(--fg2); text-align: center; padding: 40px; }
-  #composer {
-    display: flex; gap: 8px; padding: 10px 16px;
-    background: var(--bg); border-top: 1px solid var(--line);
-  }
+  #composer { display: flex; gap: 8px; padding: 10px 16px; background: var(--bg); border-top: 1px solid var(--line); }
   #composer input { flex: 1; }
-  .badge {
-    font-size: 11px; padding: 2px 7px; border-radius: 10px;
-    background: var(--bg2); color: var(--fg2);
-  }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--bg2); color: var(--fg2); }
+  .hint { font-size: 12px; color: var(--fg2); }
 </style>
 </head>
 <body>
 <header>
   <h1>teletalk</h1>
   <span class="status"><span class="dot off" id="dot"></span><span id="statusText">未连接</span></span>
-  <input type="text" id="dirInput" placeholder="抓包目录（用于离线回放）" value="C:\Users\xrl\Codes\teletalk\captures\run-2026-11-10T02-58-51-280Z\conn\0001-tls-desktop.dingtalk.com">
-  <button id="loadBtn">加载回放</button>
-  <span class="badge" id="frameBadge">0 帧</span>
+  <button id="connectBtn">连接钉钉</button>
+  <button id="loadBtn" class="ghost">刷新会话</button>
+  <span class="badge" id="frameBadge"></span>
+  <span class="hint" id="hint"></span>
 </header>
 
 <main>
   <aside id="sidebar"></aside>
   <section id="chat">
-    <div id="messages"><div class="empty">选择左侧会话查看消息</div></div>
+    <div id="messages"><div class="empty">点「连接钉钉」启动网关会话</div></div>
     <div id="composer">
       <input type="text" id="msgInput" placeholder="发送功能待实现" disabled>
       <button id="sendBtn" disabled>发送</button>
@@ -114,6 +99,7 @@
 const API = location.port === '8787' ? '' : 'http://127.0.0.1:8787';
 let dialogs = [];
 let active = null;
+let es = null;
 const $ = (id) => document.getElementById(id);
 
 async function refreshStatus() {
@@ -123,44 +109,78 @@ async function refreshStatus() {
     $('dot').className = 'dot' + (s.connected ? '' : ' off');
     $('statusText').textContent = s.connected
       ? '已连接' + (s.auth && s.auth.orgId ? ' · 组织 ' + s.auth.orgId : '')
-      : '未连接钉钉（可用离线回放）';
+      : '未连接';
   } catch (e) {
     $('dot').className = 'dot off';
     $('statusText').textContent = '网关未启动';
   }
 }
 
-async function loadReplay() {
-  const dir = $('dirInput').value.trim();
-  if (!dir) { alert('请填入抓包目录'); return; }
+async function connect() {
+  $('connectBtn').disabled = true;
+  $('hint').textContent = '正在抓取凭据并连接…（首次约 10 秒）';
+  try {
+    const r = await fetch(API + '/api/connect', { method: 'POST' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '连接失败');
+    $('hint').textContent = '';
+    openEvents();
+    await loadDialogs();
+  } catch (e) {
+    $('hint').textContent = e.message.slice(0, 160);
+  } finally {
+    $('connectBtn').disabled = false;
+    refreshStatus();
+  }
+}
+
+async function loadDialogs() {
   $('loadBtn').disabled = true;
   try {
-    const r = await fetch(API + '/api/replay?dir=' + encodeURIComponent(dir));
-    const data = await r.json();
-    if (data.error) throw new Error(data.error);
-    $('frameBadge').textContent = data.frames + ' 帧';
-    buildDialogs(data.messages);
+    const r = await fetch(API + '/api/dialogs');
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    dialogs = d.dialogs || [];
+    $('frameBadge').textContent = dialogs.length + ' 会话';
+    renderSidebar();
+    if (dialogs.length && !active) selectDialog(dialogs[0].id);
   } catch (e) {
-    alert('加载失败: ' + e.message);
+    $('frameBadge').textContent = '加载失败';
   } finally {
     $('loadBtn').disabled = false;
   }
 }
 
-function buildDialogs(messages) {
-  const byDialog = new Map();
-  for (const m of messages) {
-    if (!byDialog.has(m.dialogId)) byDialog.set(m.dialogId, []);
-    byDialog.get(m.dialogId).push(m);
-  }
-  dialogs = Array.from(byDialog.entries()).map(function (pair) {
-    const id = pair[0], msgs = pair[1];
-    const last = msgs[msgs.length - 1];
-    const title = '会话 ' + id + (last && last.senderName ? ' · ' + last.senderName : '');
-    return { id: id, title: title, messages: msgs, last: last };
-  });
+async function selectDialog(id) {
+  active = id;
   renderSidebar();
-  if (dialogs.length && !active) selectDialog(dialogs[0].id);
+  const box = $('messages');
+  box.innerHTML = '<div class="empty">加载消息…</div>';
+  try {
+    const r = await fetch(API + '/api/messages/' + encodeURIComponent(id) + '?limit=30');
+    const d = await r.json();
+    box.innerHTML = '';
+    const msgs = d.messages || [];
+    if (!msgs.length) { box.innerHTML = '<div class="empty">无消息（分页参数待调通）</div>'; return; }
+    for (const m of msgs) appendMsg(box, m);
+    box.scrollTop = box.scrollHeight;
+  } catch (e) {
+    box.innerHTML = '<div class="empty">' + e.message + '</div>';
+  }
+}
+
+function appendMsg(box, m) {
+  const div = document.createElement('div');
+  div.className = 'msg' + (m.self ? ' self' : '');
+  if (m.senderName) {
+    const who = document.createElement('div'); who.className = 'who'; who.textContent = m.senderName;
+    div.appendChild(who);
+  }
+  const body = document.createElement('div'); body.textContent = m.text; div.appendChild(body);
+  const time = document.createElement('div'); time.className = 'time';
+  time.textContent = new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  div.appendChild(time);
+  box.appendChild(div);
 }
 
 function renderSidebar() {
@@ -170,55 +190,36 @@ function renderSidebar() {
     const div = document.createElement('div');
     div.className = 'dialog' + (active === d.id ? ' active' : '');
     div.onclick = function () { selectDialog(d.id); };
-    const av = document.createElement('div');
-    av.className = 'avatar';
-    av.textContent = (d.title.match(/[A-Za-z0-9@]/) || ['#'])[0].toUpperCase();
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    const t = document.createElement('div');
-    t.className = 'title';
-    t.textContent = d.title;
-    const p = document.createElement('div');
-    p.className = 'preview';
-    p.textContent = d.last ? d.last.text.slice(0, 40) : '';
-    meta.appendChild(t);
-    meta.appendChild(p);
-    div.appendChild(av);
-    div.appendChild(meta);
+    const av = document.createElement('div'); av.className = 'avatar';
+    av.textContent = (d.title || '#').trim().charAt(0).toUpperCase();
+    const meta = document.createElement('div'); meta.className = 'meta';
+    const t = document.createElement('div'); t.className = 'title'; t.textContent = d.title || d.id;
+    const p = document.createElement('div'); p.className = 'preview';
+    p.textContent = (d.type === 'group' ? '群聊 · ' : '') + (d.lastMessage ? d.lastMessage.text.slice(0, 30) : d.id);
+    meta.appendChild(t); meta.appendChild(p);
+    div.appendChild(av); div.appendChild(meta);
     el.appendChild(div);
   });
 }
 
-function selectDialog(id) {
-  active = id;
-  renderSidebar();
-  const d = dialogs.find(function (x) { return x.id === id; });
-  const box = $('messages');
-  box.innerHTML = '';
-  if (!d) return;
-  d.messages.forEach(function (m) {
-    const div = document.createElement('div');
-    div.className = 'msg' + (m.self ? ' self' : '');
-    if (m.senderName) {
-      const who = document.createElement('div');
-      who.className = 'who';
-      who.textContent = m.senderName;
-      div.appendChild(who);
-    }
-    const body = document.createElement('div');
-    body.textContent = m.text;
-    div.appendChild(body);
-    const time = document.createElement('div');
-    time.className = 'time';
-    time.textContent = new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-    div.appendChild(time);
-    box.appendChild(div);
+/* SSE：实时消息 + 状态 */
+function openEvents() {
+  if (es) es.close();
+  es = new EventSource(API + '/api/events');
+  es.addEventListener('message', (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      if (active && d.message && (!d.message.dialogId || d.message.dialogId === active)) {
+        appendMsg($('messages'), d.message);
+        $('messages').scrollTop = $('messages').scrollHeight;
+      }
+    } catch (err) { /* 忽略 */ }
   });
-  box.scrollTop = box.scrollHeight;
+  es.addEventListener('status', () => refreshStatus());
 }
 
-$('loadBtn').onclick = loadReplay;
-$('dirInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') loadReplay(); });
+$('connectBtn').onclick = connect;
+$('loadBtn').onclick = loadDialogs;
 refreshStatus();
 setInterval(refreshStatus, 10000);
 </script>

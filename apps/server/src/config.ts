@@ -9,6 +9,8 @@ export interface Config {
     ua: string;
     token?: string;
     orgId?: string;
+    /** /reg 验证通过后自动关闭钉钉并重连（避免多客户端互踢）。默认 true；DT_AUTO_CLOSE=0 关闭 */
+    autoClose: boolean;
   };
 }
 
@@ -28,13 +30,13 @@ export function loadConfig(): Config {
       ua: process.env.DT_UA ?? DEFAULT_UA,
       token: process.env.DT_TOKEN,
       orgId: process.env.DT_ORG_ID,
+      autoClose: process.env.DT_AUTO_CLOSE !== '0',
     },
   };
 }
 
 export function validateConfig(cfg: Config): string[] {
-  const missing: string[] = [];
-  if (!cfg.dingtalk.deviceId) missing.push('DT_DEVICE_ID');
-  if (!cfg.dingtalk.token) missing.push('DT_TOKEN（需先从抓包或登录流程获取）');
-  return missing;
+  // deviceId 和 token 在启动时优先从钉钉进程内存提取，env 仅作回退
+  // 这里不再阻塞——启动时的 grab-all 才是真正的校验
+  return [];
 }

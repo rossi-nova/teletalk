@@ -53,7 +53,10 @@ int main(void) {
     unsigned char *buf = (unsigned char *)malloc(CHUNK);
 
     char token[1024] = {0};
+    char token_frame[1024] = {0};
+    char token_bare[1024] = {0};
     char did[128] = {0};
+    char did_fb[128] = {0};
     char org[64] = {0};
     char x5sign[512] = {0};
 
@@ -71,15 +74,26 @@ int main(void) {
                 if (!ReadProcessMemory(h, (LPCVOID)q, buf, want, &got)) continue;
 
                 for (SIZE_T i = 0; i + 16 <= got; i++) {
-                    /* token */
-                    if (!token[0] && buf[i] == 'o' &&
-                        memcmp(buf + i, "oauth_k1:", 9) == 0) {
+                    /* token：同时收集两种格式，结尾优先帧头格式（当前连接在用） */
+                    if (!token_frame[0] && i + 16 <= got && buf[i] == 't' &&
+                        memcmp(buf + i, "token:oauth_k1:", 15) == 0) {
+                        SIZE_T j = i + 15;
+                        while (j < got && j - i < 1000 && tok_char(buf[j])) j++;
+                        if (j - i >= 90) {
+                            memcpy(token_frame, buf + i + 6, j - i - 6);
+                            token_frame[j - i - 6] = 0;
+                            fprintf(stderr, "[token:frame] %s\n", token_frame);
+                        }
+                    }
+                    if (!token_bare[0] && buf[i] == 'o' && i + 9 <= got &&
+                        memcmp(buf + i, "oauth_k1:", 9) == 0 &&
+                        !(i > 0 && buf[i - 1] == 't')) {
                         SIZE_T j = i + 9;
                         while (j < got && j - i < 1000 && tok_char(buf[j])) j++;
                         if (j - i >= 90) {
-                            memcpy(token, buf + i, j - i);
-                            token[j - i] = 0;
-                            fprintf(stderr, "[token] len=%zu\n", j - i);
+                            memcpy(token_bare, buf + i, j - i);
+                            token_bare[j - i] = 0;
+                            fprintf(stderr, "[token:bare] %s\n", token_bare);
                         }
                     }
                     /* x5-sign */
@@ -93,21 +107,23 @@ int main(void) {
                             fprintf(stderr, "[x5-sign] len=%zu\n", j - i);
                         }
                     }
-                    /* did: 32 位 hex，通常在 "did" 附近 */
-                    if (!did[0] && i + 40 <= got && is_hex(buf[i])) {
+                    /* did：帧内 "did:<32hex>"（前面是 cs-idx-ver:0）。 */
+                    /* XMP 干扰项全大写；日志里的 did 后跟 umid_token。 */
+                    if (!did[0] && i + 36 <= got && buf[i] == 'd' &&
+                        memcmp(buf + i, "did:", 4) == 0 &&
+                        buf[i + 4] >= 'a' && buf[i + 4] <= 'f') {
                         int ok = 1;
-                        for (int m = 1; m < 32; m++) if (!is_hex(buf[i + m])) { ok = 0; break; }
-                        if (ok && (buf[i + 32] == 0 || buf[i + 32] == '"' || buf[i + 32] == ',')) {
-                            /* 前后 100 字节内有 "did" 才认 */
-                            SIZE_T s = i > 100 ? i - 100 : 0;
-                            int ctx = 0;
-                            for (SIZE_T k = s; k + 3 < i + 40 && k + 3 < got; k++) {
-                                if (memcmp(buf + k, "did", 3) == 0) { ctx = 1; break; }
-                            }
-                            if (ctx) {
-                                memcpy(did, buf + i, 32);
-                                did[32] = 0;
-                                fprintf(stderr, "[did] %s\n", did);
+                        for (int m = 1; m < 32; m++) {
+                            unsigned char c = buf[i + 4 + m];
+                            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { ok = 0; break; }
+                        }
+                        if (ok) {
+                            int inFrame = (i >= 13 && memcmp(buf + i - 13, "cs-idx-ver:0", 12) == 0);
+                            if (inFrame) {
+                                memcpy(did, buf + i + 4, 32); did[32] = 0;
+                                fprintf(stderr, "[did:frame] %s\n", did);
+                            } else if (!did_fb[0]) {
+                                memcpy(did_fb, buf + i + 4, 32); did_fb[32] = 0;
                             }
                         }
                     }
@@ -118,6 +134,9 @@ int main(void) {
         if (a < (ULONG_PTR)mbi.BaseAddress) break;
     }
 
+    if (token_frame[0]) { strcpy(token, token_frame); fprintf(stderr, "[token] use frame\n");}
+    else if (token_bare[0]) { strcpy(token, token_bare); fprintf(stderr, "[token] use bare\n");}
+    if (!did[0] && did_fb[0]) { memcpy(did, did_fb, 33); fprintf(stderr, "[did:fb] %s\n", did_fb); }
     printf("{\"pid\":%lu,\"token\":\"%s\",\"did\":\"%s\",\"x5sign\":\"%s\",\"orgId\":\"%s\"}\n",
            pid, token, did, x5sign, org);
 

@@ -86,8 +86,22 @@ export function createRoutes(manager: SessionManager): Hono {
   // —— 会话 ——
   app.get('/api/dialogs', async (c) => {
     try {
-      const frame = await manager.listDialogs();
-      return c.json({ code: frame.code, bytes: frame.body.length, hex: frame.body.toString('hex').slice(0, 400) });
+      // 优先 listNewest；若为空，允许用 ?ids=a,b,c 指定
+      const idsQ = c.req.query('ids');
+      const dialogs = idsQ
+        ? await manager.getDialogs(idsQ.split(',').map((x) => x.trim()).filter(Boolean))
+        : await manager.listDialogs();
+      return c.json({ dialogs });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
+
+  app.get('/api/dialogs/:id', async (c) => {
+    try {
+      const [d] = await manager.getDialogs([c.req.param('id')]);
+      if (!d) return c.json({ error: '会话不存在' }, 404);
+      return c.json({ dialog: d });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }
@@ -97,8 +111,8 @@ export function createRoutes(manager: SessionManager): Hono {
     const dialogId = c.req.param('dialogId');
     const limit = Number(c.req.query('limit') ?? 20);
     try {
-      const frame = await manager.listMessages(dialogId, limit);
-      return c.json({ code: frame.code, bytes: frame.body.length, hex: frame.body.toString('hex').slice(0, 800) });
+      const messages = await manager.listMessages(dialogId, limit);
+      return c.json({ messages });
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

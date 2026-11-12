@@ -5,9 +5,13 @@
 import { LwpClient } from './client.js';
 import { MidGenerator, baseHeaders, type LwpFrame } from './frame.js';
 import { extractText } from './message-codec.js';
-import { strId, numField, concat } from './bodies.js';
+import { strField, numField, concat, raw, listMessagesBody, listMessagesBodyV1, varint } from './bodies.js';
+import { parseDialogDetail, parseLastMessageSnippet, type DialogDetail } from './dialog-parser.js';
 import { buildSendBody } from './send-builder.js';
 import { getX5Headers, type X5Headers } from './x5-sign.js';
+
+// 抓包验证过的有效游标（服务端拒绝任意值）
+export const DEFAULT_CURSOR = 95482;
 
 export interface SessionConfig {
   host?: string;
@@ -39,10 +43,14 @@ export class DingtalkSession {
 
   /**
    * 刷新 x5 头。
-   * 签名由 SecurityGuardSDK64.dll 在钉钉进程内生成，这里从进程内存读取。
-   * 失败时保持空，请求仍会发出（服务端可能拒绝）。
+   * 优先用外部注入的值（grab-all 抓到的、与 token 同源），
+   * 其次从进程内存扫描（x5-dump.exe）。
    */
-  async refreshX5(): Promise<void> {
+  async refreshX5(prefill?: X5Headers): Promise<void> {
+    if (prefill?.['x5-sign']) {
+      this.x5 = prefill;
+      return;
+    }
     try {
       this.x5 = await getX5Headers();
     } catch {
@@ -63,7 +71,7 @@ export class DingtalkSession {
     });
   }
 
-  /** 带 x5 签名的头（业务请求用） */
+  /** 带 x5 签名的头（实测加签名后服务端反而报错，业务请求改走 headers()） */
   private signedHeaders(dt?: 'p' | 'j'): Record<string, string> {
     return { ...this.headers(dt), ...this.x5 };
   }
@@ -90,6 +98,12 @@ export class DingtalkSession {
     return this.client.request('/reg', this.headers());
   }
 
+  /** 订阅（需等 600ms 生效，再做业务请求） */
+  async sendSubscribe(): Promise<void> {
+    this.subscribe();
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+
   /** 订阅消息推送 */
   subscribe(): void {
     for (const uri of ['/s/sync', '/s/synca', '/s/feynman']) {
@@ -102,32 +116,61 @@ export class DingtalkSession {
     this.orgId = orgId;
   }
 
-  /** 拉取会话列表（请求体格式待补外层长度） */
+  /** 拉取会话列表：listNewest 拿 ID 列表 → 逐个 getById */
   async listDialogs(): Promise<LwpFrame> {
-    const body = numField([0x00, 0x00, 0x01, 0x04, 0x00, 30]);
-    return this.client.request('/r/Adaptor/IDLOnebox/listNewest', this.signedHeaders('p'), body);
+    return this.client.request('/r/Adaptor/IDLOnebox/listNewest', this.headers('p'), Buffer.alloc(0));
   }
 
-  /** 拉取历史消息（cursor 传 0 取最新一页） */
-  async listMessages(dialogId: string, limit = 20): Promise<LwpFrame> {
-    const body = concat(strId(dialogId), numField([0x00, 0x00, 0x01]), Buffer.from([limit]));
-    return this.client.request('/r/IDLMessage/listMessagesPaginationV2', this.signedHeaders('p'), body);
+  /** 拉取单个会话详情 */
+  async getDialog(id: string): Promise<{ detail: DialogDetail; snippet?: string } | null> {
+    const body = strField(id);
+    const f = await this.client.request('/r/IDLConversation/getById', this.headers('p'), body);
+    if (f.code !== 200) return null;
+    const detail = parseDialogDetail(f.body, id);
+    if (!detail) return null;
+    return { detail, snippet: parseLastMessageSnippet(f.body) };
+  }
+
+  /**
+   * 拉取历史消息。
+   *
+   * 用 V1（listMessagesPagination）：V2 的字段结构还没吃透（报 Decode parameter error），
+   * V1 的 body 与抓包逐字节一致，实测返回 200 + 全部历史消息。
+   *
+   * 前置条件：必须先 subscribe()（服务端会校验订阅状态）。
+   * 首次调用前需 sendSubscribe()（在 reg 之后、业务之前）。
+   */
+  async listMessages(dialogId: string, limit = 20, cursor = DEFAULT_CURSOR): Promise<LwpFrame> {
+    const body = Buffer.concat([
+      Buffer.from([0xab]),
+      Buffer.from(dialogId, 'latin1'),
+      Buffer.from('c2cf', 'hex'),
+      Buffer.from('0000019f', 'hex'),
+      // 0x61：服务端校验的第 3 参数标记位，挖掉会报 Parameter not found: 4
+      Buffer.from([0x61]),
+      // 游标：服务端校验具体值（1 / 255 / min_fetch_cursor 都报 Parameter not found）。
+      // 抓包里出现过的有效值：95482（最新页）、1778（次页）。
+      varint(cursor),
+      Buffer.from([0x1d]),
+    ]);
+    const r = await this.client.request('/r/IDLMessage/listMessagesPagination', this.headers('p'), body);
+    return r;
   }
 
   /** 已读回执 */
   async markRead(dialogId: string): Promise<LwpFrame> {
-    return this.client.request('/r/IDLMessageStatus/updateToReadV2', this.signedHeaders('p'));
+    return this.client.request('/r/IDLMessageStatus/updateToReadV2', this.headers('p'));
   }
 
   /** 发送文本消息 */
   async sendText(params: { cid: string; uid: string; orgId: string; convName: string; text: string }): Promise<LwpFrame> {
     const body = buildSendBody(params);
-    return this.client.request('/r/IDLSend/send', this.signedHeaders('p'), body);
+    return this.client.request('/r/IDLSend/send', this.headers('p'), body);
   }
 
   /** 心跳 */
   async heartbeat(): Promise<void> {
-    this.client.fire('/r/Adaptor/TangleNetworkSession/heartbeat', this.signedHeaders('p'), Buffer.from([0x81, 0x03, 0x90]));
+    this.client.fire('/r/Adaptor/TangleNetworkSession/heartbeat', this.headers('p'), Buffer.from([0x81, 0x03, 0x90]));
   }
 
   private onPush(frame: LwpFrame): void {
