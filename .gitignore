@@ -21,3 +21,6 @@ docs/research/dingtalk-protocol/extracted/lwp-samples/parsed.txt
 
 # 网关
 apps/server/.env
+
+# Ghidra 项目与分析产物
+.ghidra/
