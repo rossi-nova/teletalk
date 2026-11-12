@@ -28,6 +28,10 @@ cmd /c "`"$vcvars`" && cd build && cl /nologo /O2 /Fe:<name>.exe ..\<src>.c adva
 | `rev-object.c` | `rev-object.exe` | token 持有者反查 | ✅ |
 | `deep-obj.c` | `deep-obj.exe` | 对象字段深度 dump | ✅ |
 | `token-analyze.c` | `token-analyze.exe` | base64 解码与结构分析 | ✅ |
+| `list-dids.c` | `list-dids.exe` | 枚举内存里全部 did 候选（含上下文）| ✅ |
+| `dump-frames.c` | `dump-frames.exe` | dump 内存里的 LWP 帧 blob | ✅ |
+| `dump-lwp-reqs.c` | `dump-lwp-reqs.exe` | 按 URI 过滤扫 LWP 请求帧 | ✅ |
+| `dump-around-did.c` | `dump-around-did.exe` | dump did 命中点附近内存 | ✅ |
 | `sign.c` | `teletalk-sign.exe` | SDK 导出直接调用 | ⚠️ ABI 未确认 |
 | `abi-probe.c` | `abi-probe.exe` | initUMID 参数枚举 | ✅ 结论见文档 |
 | `hwbp.c` / `hwbp2.c` | `hwbp.exe` | 硬件断点捕获 | ⚠️ 会冻结钉钉，需谨慎 |
