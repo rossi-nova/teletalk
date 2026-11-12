@@ -689,3 +689,74 @@ npx tsx tools/disasm/ud2-graph.ts <sdk> 182380 0x6000
 - 协议层：完全打通
 - 签名：可提取
 - 唯一缺的：token 有效期（旁路提取可解决）
+
+## 二十六、端到端实测结果（决定性）
+
+### 关键突破：token 可从内存直接提取
+
+**不需要 MITM、不需要 Clash 规则、不需要重启钉钉。**
+
+`tools/sign/grab-all.exe` 直接读进程内存，一次拿齐：
+
+```json
+{
+  "pid": 19692,
+  "token": "oauth_k1:OJIUj9CASqHEam6+SxvZ4/kzau3JRcrOuf7dij0Pd...",
+  "did":   "bca6f4d9592a54480792269b83c457bb",
+  "x5sign": "wzMK2c002xAAJ3uZzkgaDTMZGowLh3uXcVVUsdZI..."
+}
+```
+
+**耗时：约 3 秒。**
+
+### 实测请求结果
+
+| 请求 | 结果 | 意义 |
+|---|---|---|
+| `/reg/init` | **200** | 连接建立成功 |
+| `/reg` | **200**（路由 HZ）| **鉴权 + 签名通过** |
+| `listNewest` | **200** `0xC0` | **业务接口可用**（空会话列表）|
+| `/r/Aladdin/lookup` | 500 | 该接口需要额外参数 |
+
+### 两个关键约束
+
+**约束 1：token 与设备 ID 必须配对**
+
+```
+❌ did=2b482fd291e5751003c4b20d52ec9613 → 401 "device id or appkey is not equal"
+✅ did=bca6f4d9592a54480792269b83c457bb → 200
+```
+
+后者是进程内存中 `did:` 格式串的实际值。
+
+**约束 2：钉钉客户端在线会踢掉第三方连接**
+
+`/reg` 成功后被服务端立即断开（同步推送多端互踢）。
+解法：先用 `taskkill` 关钉钉，再用已抓的 token 连接。
+
+### 完整可用闭环（已实测）
+
+```
+1. grab-all.exe          从内存抓 token + did + x5-sign   （3 秒）
+2. taskkill DingTalk     关闭客户端，避免互踢
+3. LwpClient.connect()   连 tls-desktop.dingtalk.com
+4. /reg                  200，拿到路由 HZ
+5. 业务请求              200，可用
+```
+
+### 这一轮回答了「运行时提取能否让应用可用」
+
+**答案是：能。**
+
+- 协议：已验证（`/reg` 200）
+- 签名：已验证（带 x5-sign 的请求被接受）
+- 业务：已验证（`listNewest` 200）
+- 登录态：3 秒提取，无需用户操作
+
+### 剩余工作（工程，非逆向）
+
+1. `grab-all.exe` 集成进网关启动流程
+2. 处理「钉钉必须关闭」这个约束（提示用户，或优雅降级）
+3. 会话列表 / 消息分页的正确 protobuf body
+4. 前端对接
+
