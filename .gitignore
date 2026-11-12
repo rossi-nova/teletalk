@@ -24,3 +24,6 @@ apps/server/.env
 
 # Ghidra 项目与分析产物
 .ghidra/
+
+# 签名工具的编译产物与 SDK 副本
+tools/sign/build/

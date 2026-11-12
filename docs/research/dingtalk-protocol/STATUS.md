@@ -92,6 +92,22 @@ loginByFido            → token              ❌ 需 x5-sign 签名
 
 **备选方案**：旁路提取（用户正常登录，MITM 抓 token）。
 
+### 4. SDK 签名（第三轮进展，2026-11-12）
+
+**已解决**：
+
+- SDK 加载宿主、接口工厂（QueryInterface 的 11 个接口 ID）
+- RTTI 类名全览（77 个，含 CDynamicTokenSign / CVMSign）
+- x5-sign 结构（12 字符头 + 66 字节体）
+- **运行时提取**：tools/sign/x5-dump.exe
+
+**未解决**：
+
+- 签名算法本体（跳板混淆 + vmsign 配置加密）
+- 签名有效性验证（token 过期阻塞）
+
+详见 `sdk-reverse-round3.md`。
+
 ### 3. Token 生命周期
 
 实测：数小时后失效（`/reg` 返回 401）。
