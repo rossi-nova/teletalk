@@ -323,7 +323,7 @@ export class SessionManager extends EventEmitter {
     const s = this.requireSession();
     const frame = await s.listMessages(dialogId, limit ?? 20);
     if (frame.code !== 200) return [];
-    return parseMessagePage(frame.body, dialogId);
+    return s.fillSenders(parseMessagePage(frame.body, dialogId));
   }
 
   requireSession(): DingtalkSession {

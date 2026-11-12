@@ -73,9 +73,28 @@ ab <cid>  c2  cf 0000019f  61  <cursor varint>  1d
 - 头 `zip: true`，body 是 gzip，`client.ts` 统一解压
 - 内容是 Gaea 二进制，消息正文以 UTF-8 文本块散布；`message-parse.ts` 按启发式提取
 
-### V2 尚未打通
+### V2
 
-`listMessagesPaginationV2` 结构更复杂，仍在 `Decode parameter error: 2`，暂不使用。
+`listMessagesPaginationV2` 抓包原样 body **可以 200**（早前报错是因为没先订阅）。
+但响应结构与 V1 同源，同样不含 senderId，暂不使用。
+
+### 消息字段的真相
+
+**V1/V2 历史接口都不返回发送者**，这不是解析问题：
+
+- 消息块以 `0a 00` `0c 00` 开头，两个字段恒为空字符串
+- `MessageTail` 只是把消息头再包一层，同样没有 sender
+- 能拿到的：正文（payload JSON 的 `"text"`）、`messageId`（`3-{cid}-{ts}`）、
+  `sendMsgUUID`、**发送者索引**（`0x12` 后的 Gaea 数值，同一人恒定）
+
+发送者索引是可行上限：能区分「12 个人发言」，但还原不出真实 uid。
+
+### 实时推送补全
+
+`/s/sync` 推送**带完整字段**：`senderId`、`sourceNick`、`messageId`、正文。
+
+网关做了 `messageId → {senderId, nick}` 缓存（`session.ts` 的 `rememberSenders`），
+解析历史时用 `fillSenders` 回填。等有新消息进来后，同一消息的历史查询即有真实姓名。
 
 ## 4. 前端对接
 

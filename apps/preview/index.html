@@ -172,8 +172,12 @@ async function selectDialog(id) {
 function appendMsg(box, m) {
   const div = document.createElement('div');
   div.className = 'msg' + (m.self ? ' self' : '');
-  if (m.senderName) {
-    const who = document.createElement('div'); who.className = 'who'; who.textContent = m.senderName;
+  const label = m.senderName || (m.senderKey != null ? senderLabel(m.senderKey) : '');
+  if (label) {
+    const who = document.createElement('div');
+    who.className = 'who';
+    who.textContent = label;
+    if (m.senderKey != null) who.style.color = senderColor(m.senderKey);
     div.appendChild(who);
   }
   const body = document.createElement('div'); body.textContent = m.text; div.appendChild(body);
@@ -181,6 +185,17 @@ function appendMsg(box, m) {
   time.textContent = new Date(m.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   div.appendChild(time);
   box.appendChild(div);
+}
+
+/* 钉钉历史接口不返回发言人姓名，用稳定索引区分 */
+const senderNames = new Map();
+function senderLabel(key) {
+  if (!senderNames.has(key)) senderNames.set(key, '成员 ' + (senderNames.size + 1));
+  return senderNames.get(key);
+}
+function senderColor(key) {
+  const hue = (Number(key) * 47) % 360;
+  return 'hsl(' + hue + ' 65% 52%)';
 }
 
 function renderSidebar() {

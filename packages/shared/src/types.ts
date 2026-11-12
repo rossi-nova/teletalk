@@ -20,6 +20,8 @@ export interface Message {
   kind: 'text' | 'image' | 'file' | 'system';
   resourceId?: string;
   self: boolean;
+  /** 发送者稳定索引（钉钉历史接口不返回真实 uid，用此值区分发言人） */
+  senderKey?: number;
 }
 
 export interface SendTextRequest {

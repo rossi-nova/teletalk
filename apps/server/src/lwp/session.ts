@@ -175,8 +175,40 @@ export class DingtalkSession {
 
   private onPush(frame: LwpFrame): void {
     // 推送帧：code=200 但无对应 inflight 的请求
+    this.rememberSenders(frame.body);
     this.emitMessage({ mid: frame.headers.mid ?? '', uri: '', body: frame.body });
   }
+
+  /**
+   * 推送里有 senderId/sourceNick，但历史消息接口（V1/V2）不返回。
+   * 这里把 messageId → {senderId,nick} 记下来，解析历史时回填。
+   */
+  private rememberSenders(body: Buffer): void {
+    const s = body.toString('utf8');
+    const re = /\{"senderId":(\d+),"conversationId":"([^"]+)","messageId":(\d+)[\s\S]{0,200}?"content":\{([\s\S]*?)\}\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(s))) {
+      const [, senderId, , messageId] = m;
+      const nick = s.match(new RegExp(`\\u0000sourceNick\\u0000([^\\u0000]{1,40})`))?.[1]?.trim();
+      if (messageId) this.senderCache.set(messageId!, { senderId: senderId!, nick });
+    }
+  }
+
+  /** 历史消息解析后回填推送里见过的发言人 */
+  fillSenders<T extends { rawId?: string; senderId: string; senderName?: string }>(msgs: T[]): T[] {
+    for (const m of msgs) {
+      const tail = m.rawId?.split('-').pop();
+      if (!tail) continue;
+      const hit = this.senderCache.get(tail);
+      if (hit) {
+        m.senderId = hit.senderId;
+        if (hit.nick) m.senderName = hit.nick;
+      }
+    }
+    return msgs;
+  }
+
+  private senderCache = new Map<string, { senderId: string; nick?: string }>();
 
   private listeners: Array<(m: RawMessage) => void> = [];
   onMessage(fn: (m: RawMessage) => void): void {
