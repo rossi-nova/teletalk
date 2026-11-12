@@ -211,5 +211,93 @@ XOR 密钥流: 00 00 41 70 00 00 00 00 00 77 00 71 00 49 00 00
 
 ### 判断
 
-静态逆向到此为止。**跳板混淆 + 配置驱动**使复刻成本远超收益。
-**运行时提取**（已实现）是工程上可用的方案。
+静态逆向突破了 vmsign 配置层，但签名算法本体仍需配置内容。
+**运行时提取**（已实现）是工程上可用的方案；
+**vmsign 解密**（本篇第十四节）为静态复刻打开了新路径。
+
+## 十四、vmsign 配置解密（已完成）
+
+### 解密算法
+
+逆向自 SDK RVA `0x107290`–`0x1072D9` 的 36 字节解码循环：
+
+```asm
+107290  mov  bl, 19h              ; 初始值
+107292  mov  eax, 2               ; 从索引 2 开始
+107297  lea  rdi, [8DFDD0h]       ; 密文源
+10729e  lea  rsi, [0A2A281h]      ; 输出缓冲
+107289  mov  byte [0A2A281h], 33h ; out[0] 预置 '3'
+
+1072B0  shr  bl, 7                ; 取最高位作进位
+1072B3  movzx edx, byte [rax+rdi-1]
+1072BA  add  cl, cl               ; 左移 1
+1072BC  or   cl, bl               ; 拼进位
+1072BE  mov  [rax+rsi-1], cl      ; out[i-1]
+
+1072C2  movzx ecx, byte [rax+rdi]
+1072C6  shr  dl, 7                ; 前一字节的最高位
+1072CB  add  cl, cl
+1072CD  or   cl, dl
+1072CF  mov  [rax+rsi], cl        ; out[i]
+
+1072D2  add  rax, 2
+1072D6  cmp  eax, 26h             ; 循环到 0x26（38）
+```
+
+**等价公式**（比特流整体左移 1 位）：
+
+```
+out[0] = 0x33   （预置，不覆盖）
+out[i] = (ct[i] << 1) | (ct[i-1] >> 7)     for i = 1..35
+```
+
+### 解出的结果
+
+```
+vmsign_config_fi = 3be229e1-301d-4639-b88a-16997824d71b
+```
+
+标准 GUID 格式，验证通过。
+
+### 实现
+
+`scripts/vmsign-decode.ts`：
+
+```typescript
+export function decodeVmsign(sdkPath: string, rva: number, len = 36): string {
+  const out = Buffer.alloc(len);
+  out[0] = 0x33;
+  for (let i = 1; i < len; i++) {
+    out[i] = ((buf[src + i] << 1) & 0xff) | ((buf[src + i - 1] >> 7) & 1);
+  }
+  return out.toString('latin1');
+}
+```
+
+### 意义
+
+- **`vmsign_config_fi` 的障碍已清除**：之前认为「配置驱动、无法复刻」，
+  现在知道它只是一个 GUID，配置本体从服务端按此 ID 拉取。
+- 该 GUID 在文件中仅以加密形式存在（解码后无二次引用），
+  说明它是**运行时配置查询的键**。
+- 后续：拿到这个 GUID 对应的配置内容，即可还原 vmsign 的签名算法定义。
+
+### 顺序解析器
+
+`0x107304` 调用 `0x48D9D0`（配置查询器，4 参数），
+其跳板终点 `0x48DE8F` 是状态机入口。该函数尚未完整还原。
+
+## 十五、第三轮最终状态
+
+| 目标 | 状态 |
+|---|---|
+| Ghidra 环境 | ✅ |
+| 16 个函数反编译 | ✅（内容受混淆影响） |
+| x5-sign 结构 | ✅ 完全破解 |
+| x5-sign 运行时提取 | ✅ 3 个真实样本 |
+| 签名输入对象 | ✅ 定位并解析 |
+| RTTI 类名全览 | ✅ 77 个 |
+| **vmsign 配置解密** | ✅ **算法 + GUID** |
+| `getSecurityToken` CFF 语义 | ❌ 217 状态未还原 |
+| 签名算法本体 | ⏳ 需要 GUID 对应的配置内容 |
+| 签名有效性验证 | ❌ token 过期 |
