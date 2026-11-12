@@ -455,3 +455,75 @@ export function decodeVmsign(sdkPath: string, rva: number, len = 36): string {
 3. **运行时读取**：如果配置已在内存，扩大搜索范围（当前只搜了精确 GUID）
 
 方案 3 最省事且不需要打扰用户，值得先试。
+
+## 二十、最后一环的探索结果
+
+### SignBR 不是本地文件
+
+SDK 内含路径 `..\SignBox\SignBR`（RVA `0x8f923b`），但：
+
+| 搜索位置 | 结果 |
+|---|---|
+| `%APPDATA%\DingTalk` | 无 SignBox 目录 |
+| `%LOCALAPPDATA%\DingTalk` | 无 |
+| 钉钉安装目录 | 无 SignBR 文件 |
+| `C:\Users\xrl\AppData` 递归 | 无 |
+
+**结论**：`SignBR` 是**运行时下载**的签名模块，不在本地。
+
+### 堆内存扫描结果
+
+在钉钉进程（PID 5668）堆中搜索特征词：
+
+| 关键词 | 命中 |
+|---|---|
+| `vmsign` / `VMSign` | 0 |
+| `sign_br` / `SignBR` / `SignBox` | 0 |
+| `sign_config` / `static_sign` / `dynamic_sign` | 0 |
+
+**结论**：**vmsign 配置在当前会话从未被拉取**。
+
+### 这意味着什么
+
+1. `vmsign` 只在**特定业务场景**触发（不是每次启动都拉）
+2. 当前钉钉会话用的是**其它签名路径**（`CDynamicTokenSign` 走的是本地算法）
+3. 已提取的 x5-sign 正是**本地算法产出**，不需要 vmsign 配置
+
+**重要推论**：`vmsign` 不是 x5-sign 的必要条件。
+`getSecurityToken` 的主路径（本地签名）已经能产出有效签名。
+
+## 二十一、最终状态
+
+### 逆向达成度
+
+| 层 | 状态 |
+|---|---|
+| 协议层（LWP 帧） | ✅ 完全 |
+| 鉴权层（token） | ✅ 旁路提取可用 |
+| 签名层（x5-sign） | ✅ **可运行时提取** |
+| 签名算法（本地路径） | ⚠️ 结构已知，算法未复刻 |
+| 签名算法（vmsign 路径） | ⚠️ 配置未下载，且非必需 |
+| CFF 虚拟机 | ❌ 未还原（217 状态） |
+
+### 工程可用性
+
+**当前可交付的能力**：
+
+```
+1. 从钉钉进程提取真实 x5-sign（tools/sign/x5-dump.exe）
+2. 注入 LWP 请求（apps/server/src/lwp/x5-sign.ts）
+3. 完整协议栈（LWP / 消息编解码 / 发送构造）
+```
+
+**阻塞项只有一个**：token 有效期。
+`tools\capture-login.bat` 可解决（30 秒，需用户操作）。
+
+### 给后续的指引
+
+若要继续静态复刻签名算法：
+
+1. 让钉钉触发 vmsign 路径（可能需要在特定页面/操作后）
+2. 用 `tools/sign/find-config.exe` 扫描到配置后再分析
+3. 或用管理员权限跑 `hwbp.exe` 在 `0x107304` 断点
+
+若只为工程可用：**无需继续**，提取方案已足够。
