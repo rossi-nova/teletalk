@@ -89,7 +89,7 @@
   <section id="chat">
     <div id="messages"><div class="empty">点「连接钉钉」启动网关会话</div></div>
     <div id="composer">
-      <input type="text" id="msgInput" placeholder="发送功能待实现" disabled>
+      <input type="text" id="msgInput" placeholder="输入消息…" disabled>
       <button id="sendBtn" disabled>发送</button>
     </div>
   </section>
@@ -161,11 +161,45 @@ async function selectDialog(id) {
     const d = await r.json();
     box.innerHTML = '';
     const msgs = d.messages || [];
-    if (!msgs.length) { box.innerHTML = '<div class="empty">无消息（分页参数待调通）</div>'; return; }
-    for (const m of msgs) appendMsg(box, m);
-    box.scrollTop = box.scrollHeight;
+    if (!msgs.length) {
+      box.innerHTML = '<div class="empty">无消息</div>';
+    } else {
+      for (const m of msgs) appendMsg(box, m);
+      box.scrollTop = box.scrollHeight;
+    }
   } catch (e) {
     box.innerHTML = '<div class="empty">' + e.message + '</div>';
+  }
+  updateComposer();
+}
+
+/** 选中会话后才允许输入 */
+function updateComposer() {
+  const ok = !!active;
+  $('msgInput').disabled = !ok;
+  $('sendBtn').disabled = !ok;
+  $('msgInput').placeholder = ok ? '输入消息…' : '先选择一个会话';
+}
+
+async function send() {
+  const box = $('msgInput');
+  const text = box.value.trim();
+  if (!active || !text) return;
+  $('sendBtn').disabled = true;
+  try {
+    const r = await fetch(API + '/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dialogId: active, text }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || ('HTTP ' + (d.code ?? '?')));
+    box.value = '';
+    await selectDialog(active);
+  } catch (e) {
+    $('hint').textContent = '发送失败：' + e.message;
+  } finally {
+    $('sendBtn').disabled = false;
   }
 }
 
@@ -234,6 +268,10 @@ function openEvents() {
 }
 
 $('connectBtn').onclick = connect;
+$('sendBtn').onclick = send;
+$('msgInput').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') send();
+});
 $('loadBtn').onclick = loadDialogs;
 refreshStatus();
 setInterval(refreshStatus, 10000);

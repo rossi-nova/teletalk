@@ -281,7 +281,7 @@ export class SessionManager extends EventEmitter {
       this.broadcast({ type: 'message', message: msg });
     });
   }
-  async sendText(params: { cid: string; uid: string; orgId: string; convName: string; text: string }) {
+  async sendText(params: { cid: string; text: string; uid?: string; orgId?: string; convName?: string }) {
     return this.requireSession().sendText(params);
   }
 

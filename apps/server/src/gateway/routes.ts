@@ -120,10 +120,15 @@ export function createRoutes(manager: SessionManager): Hono {
 
   app.post('/api/send', async (c) => {
     try {
-      const body = await c.req.json<{ cid: string; uid: string; orgId: string; convName: string; text: string }>();
-      if (!body.text?.trim()) return c.json({ error: 'text 不能为空' }, 400);
-      const frame = await manager.sendText(body);
-      return c.json({ ok: frame.code === 200, code: frame.code });
+      const body = await c.req.json<{ dialogId?: string; text?: string }>();
+      if (!body.dialogId) return c.json({ ok: false, error: 'dialogId 不能为空' }, 400);
+      if (!body.text?.trim()) return c.json({ ok: false, error: 'text 不能为空' }, 400);
+      const frame = await manager.sendText({ cid: body.dialogId, text: body.text });
+      if (frame.code !== 200) {
+        const msg = frame.body.toString('utf8').replace(/[^ -~一-龥]/g, '').slice(0, 80);
+        return c.json({ ok: false, code: frame.code, error: msg || ('HTTP ' + frame.code) });
+      }
+      return c.json({ ok: true, code: frame.code });
     } catch (e) {
       return c.json({ ok: false, error: (e as Error).message }, 400);
     }

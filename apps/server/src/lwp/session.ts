@@ -12,6 +12,7 @@ import { getX5Headers, type X5Headers } from './x5-sign.js';
 
 // 抓包验证过的有效游标（服务端拒绝任意值）
 export const DEFAULT_CURSOR = 95482;
+export const DEFAULT_UID = "79553200501";
 
 export interface SessionConfig {
   host?: string;
@@ -163,8 +164,27 @@ export class DingtalkSession {
   }
 
   /** 发送文本消息 */
-  async sendText(params: { cid: string; uid: string; orgId: string; convName: string; text: string }): Promise<LwpFrame> {
-    const body = buildSendBody(params);
+  /**
+   * 发送文本。
+   *
+   * 参数里的 orgId / convName 若缺省，自动从 getById 补齐。
+   * uid 目前仍取抓包样本值（本账号 uid 尚未从内存可靠提取）。
+   */
+  async sendText(params: { cid: string; uid?: string; orgId?: string; convName?: string; text: string }): Promise<LwpFrame> {
+    let { uid, orgId, convName } = params;
+    if (!orgId || !convName) {
+      const detail = await this.getDialog(params.cid);
+      orgId = orgId ?? detail?.detail.orgId;
+      convName = convName ?? detail?.detail.title;
+    }
+    if (!orgId || !convName) throw new Error('缺少 orgId/convName，且无法从会话详情补齐');
+    const body = buildSendBody({
+      cid: params.cid,
+      uid: uid ?? DEFAULT_UID,
+      orgId,
+      convName,
+      text: params.text,
+    });
     return this.client.request('/r/IDLSend/send', this.headers('p'), body);
   }
 
